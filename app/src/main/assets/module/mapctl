@@ -1,0 +1,42 @@
+#!/system/bin/sh
+MODDIR=${0%/*}
+CONFIG="$MODDIR/config"
+LOG=/data/local/tmp/rg505_mapperd.log
+PIDFILE=/data/local/tmp/rg505_mapperd.pid
+STOPFILE=/data/local/tmp/rg505_mapperd.disabled
+
+usage() { cat <<'USAGE'
+RG505 Input Mapper native CLI
+Commands: status, logs [n], restart, stop, start, preset starbound, set-input <input> <target>, set-mouse-axes <x> <y>, mouse-config <cx> <cy> <deadzone> <speed> [intervalMs], show-config
+USAGE
+}
+
+load_cfg() { EVENT_NAME="Xbox Wireless Controller"; OUTPUT_NAME="RG505 D-pad WASD"; OUTPUT_MOUSE_NAME="RG505 Mapper Mouse"; DEBUG=0; MOUSE_AXIS_X="ABS_Z"; MOUSE_AXIS_Y="ABS_RZ"; MOUSE_CENTER_X=0; MOUSE_CENTER_Y=0; MOUSE_DEADZONE=200; MOUSE_SPEED=2; MOUSE_INTERVAL_MS=8; [ -f "$CONFIG" ] && . "$CONFIG"; }
+write_maps() { tmp="$1"; { echo "EVENT_NAME=\"$EVENT_NAME\""; echo "OUTPUT_NAME=\"$OUTPUT_NAME\""; echo "OUTPUT_MOUSE_NAME=\"$OUTPUT_MOUSE_NAME\""; echo "DEBUG=$DEBUG"; echo "MOUSE_AXIS_X=\"$MOUSE_AXIS_X\""; echo "MOUSE_AXIS_Y=\"$MOUSE_AXIS_Y\""; echo "MOUSE_CENTER_X=$MOUSE_CENTER_X"; echo "MOUSE_CENTER_Y=$MOUSE_CENTER_Y"; echo "MOUSE_DEADZONE=$MOUSE_DEADZONE"; echo "MOUSE_SPEED=$MOUSE_SPEED"; echo "MOUSE_INTERVAL_MS=$MOUSE_INTERVAL_MS"; i=1; while IFS= read -r m; do [ -n "$m" ] && echo "MAP_$i=\"$m\"" && i=$((i+1)); done < "$tmp"; } > "$CONFIG"; }
+current_maps() { tmp="$1"; : > "$tmp"; i=1; while :; do eval m=\${MAP_$i:-}; [ -z "$m" ] && break; echo "$m" >> "$tmp"; i=$((i+1)); done; }
+input_key() { IFS=:; set -- $1; IFS=' '; [ "$1" = axis ] && echo "axis:$2:$3" || { [ "$1" = button ] && echo "button:$2"; }; }
+set_input() { load_cfg; in="$1"; target="$2"; new="$in:$target"; tmp=/data/local/tmp/rg505_mapctl.$$; : > "$tmp"; i=1; while :; do eval m=\${MAP_$i:-}; [ -z "$m" ] && break; [ "$(input_key "$m")" != "$in" ] && echo "$m" >> "$tmp"; i=$((i+1)); done; echo "$new" >> "$tmp"; write_maps "$tmp"; rm -f "$tmp"; echo "mapped $in -> $target"; }
+restart() { stop >/dev/null 2>&1; start; }
+stop() { touch "$STOPFILE"; p=$(cat "$PIDFILE" 2>/dev/null); [ -n "$p" ] && kill "$p" 2>/dev/null; sleep 1; echo stopped; }
+start() { rm -f "$STOPFILE"; : > "$LOG"; "$MODDIR/rg505_mapperd" "$CONFIG" >> "$LOG" 2>&1 & sleep 1; tail -n 80 "$LOG"; }
+status() { echo "module=$MODDIR"; cat "$MODDIR/module.prop"; echo "pid=$(cat "$PIDFILE" 2>/dev/null)"; echo "disabled=$([ -f "$STOPFILE" ] && echo yes || echo no)"; echo "--- config ---"; cat "$CONFIG"; }
+preset_starbound() { cat > "$CONFIG" <<'CFG'
+EVENT_NAME="Xbox Wireless Controller"
+OUTPUT_NAME="RG505 D-pad WASD"
+OUTPUT_MOUSE_NAME="RG505 Mapper Mouse"
+DEBUG=0
+MOUSE_AXIS_X="ABS_Z"
+MOUSE_AXIS_Y="ABS_RZ"
+MOUSE_CENTER_X=0
+MOUSE_CENTER_Y=0
+MOUSE_DEADZONE=200
+MOUSE_SPEED=2
+MOUSE_INTERVAL_MS=8
+MAP_1="axis:ABS_HAT0X:-:KEY_A"
+MAP_2="axis:ABS_HAT0X:+:KEY_D"
+MAP_3="axis:ABS_HAT0Y:-:KEY_W"
+MAP_4="axis:ABS_HAT0Y:+:KEY_S"
+CFG
+ echo preset written; }
+cmd="$1"; shift 2>/dev/null || true
+case "$cmd" in status) status ;; logs) tail -n "${1:-100}" "$LOG" ;; restart) restart ;; stop) stop ;; start) start ;; preset) [ "$1" = starbound ] && preset_starbound || usage ;; set-input) set_input "$1" "$2" ;; set-mouse-axes) load_cfg; MOUSE_AXIS_X="$1"; MOUSE_AXIS_Y="$2"; tmp=/data/local/tmp/rg505_mapctl.$$; current_maps "$tmp"; write_maps "$tmp"; rm -f "$tmp" ;; mouse-config) load_cfg; MOUSE_CENTER_X="$1"; MOUSE_CENTER_Y="$2"; MOUSE_DEADZONE="$3"; MOUSE_SPEED="$4"; [ -n "$5" ] && MOUSE_INTERVAL_MS="$5"; tmp=/data/local/tmp/rg505_mapctl.$$; current_maps "$tmp"; write_maps "$tmp"; rm -f "$tmp" ;; show-config) cat "$CONFIG" ;; *) usage ;; esac

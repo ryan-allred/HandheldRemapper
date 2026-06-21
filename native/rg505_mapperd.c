@@ -140,6 +140,13 @@ static int find_event_by_name(const char *name, char *out, size_t outsz) { FILE 
 static int wait_event(const char *name, char *out, size_t outsz) { for(int i=0;i<100;i++){ if(find_event_by_name(name,out,outsz)==0) return 0; usleep(100000); } return -1; }
 static int send_ev(int fd, uint16_t type, uint16_t code, int32_t value) { struct input_event ev; memset(&ev,0,sizeof(ev)); gettimeofday(&ev.time,NULL); ev.type=type; ev.code=code; ev.value=value; return write(fd,&ev,sizeof(ev))==(ssize_t)sizeof(ev)?0:-1; }
 static void sync_ev(int fd){ send_ev(fd,EV_SYN,SYN_REPORT,0); }
+static int clamp_hid_rel(int v) { if(v>127)return 127; if(v<-127)return -127; return v; }
+static int hid_byte(int v) { return clamp_hid_rel(v)&0xff; }
+static int mouse_button_bit(int code) { if(code==BTN_LEFT)return 1; if(code==BTN_RIGHT)return 2; if(code==BTN_MIDDLE)return 4; return 0; }
+static void send_hid_mouse(FILE *hid, int buttons, int dx, int dy, int wheel) {
+    fprintf(hid,"{\"id\":2,\"command\":\"report\",\"report\":[0x%02x,0x%02x,0x%02x,0x%02x]}\n", buttons&7, hid_byte(dx), hid_byte(dy), hid_byte(wheel));
+    fflush(hid);
+}
 static int mouse_delta_fp(int raw, int center, int min, int max, int dz, int speed){
     int diff=raw-center;
     int ad=diff<0?-diff:diff;
@@ -164,17 +171,25 @@ static int consume_mouse_delta(int *accum, int delta_fp) {
     *accum -= d*MOUSE_FP;
     return d;
 }
-static void set_target(const Mapping *m, int keyfd, int mousefd, int down) {
+static void set_target(const Mapping *m, int keyfd, FILE *hid, int *mouse_buttons, int down) {
     if(m->target_type==TARGET_WHEEL) {
         if(down) {
-            send_ev(mousefd, EV_REL, REL_WHEEL, m->target_code);
-            sync_ev(mousefd);
+            send_hid_mouse(hid, *mouse_buttons, 0, 0, m->target_code);
+            send_hid_mouse(hid, *mouse_buttons, 0, 0, 0);
         }
         return;
     }
-    int fd = m->target_type==TARGET_KEY ? keyfd : mousefd;
-    send_ev(fd, EV_KEY, m->target_code, down);
-    sync_ev(fd);
+    if(m->target_type==TARGET_MOUSE) {
+        int bit=mouse_button_bit(m->target_code);
+        if(bit) {
+            if(down) *mouse_buttons |= bit;
+            else *mouse_buttons &= ~bit;
+            send_hid_mouse(hid, *mouse_buttons, 0, 0, 0);
+        }
+        return;
+    }
+    send_ev(keyfd, EV_KEY, m->target_code, down);
+    sync_ev(keyfd);
 }
 
 int main(int argc, char **argv) {
@@ -190,7 +205,7 @@ int main(int argc, char **argv) {
     FILE *hid=start_hid(&cfg);
     if(!hid){logf2("ERROR starting hid"); return 1;}
 
-    int rc=0, src=-1, keyfd=-1, mousefd=-1, grabbed=0;
+    int rc=0, src=-1, keyfd=-1, grabbed=0;
     char srcpath[128], keypath[128], mousepath[128];
     if(wait_event(cfg.event_name,srcpath,sizeof(srcpath))||wait_event(cfg.output_name,keypath,sizeof(keypath))||wait_event(cfg.output_mouse_name,mousepath,sizeof(mousepath))){
         logf2("ERROR finding event nodes");
@@ -200,8 +215,7 @@ int main(int argc, char **argv) {
     logf2("events source=%s keyboard=%s mouse=%s",srcpath,keypath,mousepath);
     src=open(srcpath,O_RDONLY|O_CLOEXEC);
     keyfd=open(keypath,O_WRONLY|O_CLOEXEC);
-    mousefd=open(mousepath,O_WRONLY|O_CLOEXEC);
-    if(src<0||keyfd<0||mousefd<0){
+    if(src<0||keyfd<0){
         logf2("ERROR open fds: %s",strerror(errno));
         rc=3;
         goto cleanup;
@@ -216,7 +230,7 @@ int main(int argc, char **argv) {
     }
 
     int mx_code=abs_code(cfg.mouse_axis_x), my_code=abs_code(cfg.mouse_axis_y);
-    int mdx_fp=0, mdy_fp=0, accx=0, accy=0;
+    int mdx_fp=0, mdy_fp=0, accx=0, accy=0, mouse_buttons=0;
     struct pollfd pfd={.fd=src,.events=POLLIN};
     while(!g_stop && access(STOPFILE,F_OK)!=0){
         int pr=poll(&pfd,1,cfg.mouse_interval_ms);
@@ -237,7 +251,7 @@ int main(int argc, char **argv) {
                             }
                             int active=(dir==m->dir);
                             if(active!=m->active){
-                                set_target(m,keyfd,mousefd,active);
+                                set_target(m,keyfd,hid,&mouse_buttons,active);
                                 m->active=active;
                             }
                         }
@@ -256,7 +270,7 @@ int main(int argc, char **argv) {
                         if(m->type==MAP_BUTTON && m->src_code==ev.code){
                             int active=ev.value!=0;
                             if(active!=m->active){
-                                set_target(m,keyfd,mousefd,active);
+                                set_target(m,keyfd,hid,&mouse_buttons,active);
                                 m->active=active;
                             }
                         }
@@ -268,19 +282,17 @@ int main(int argc, char **argv) {
         int mdx=mdx_fp?consume_mouse_delta(&accx,mdx_fp):0;
         int mdy=mdy_fp?consume_mouse_delta(&accy,mdy_fp):0;
         if(mdx||mdy){
-            if(mdx) send_ev(mousefd,EV_REL,REL_X,mdx);
-            if(mdy) send_ev(mousefd,EV_REL,REL_Y,mdy);
-            sync_ev(mousefd);
+            send_hid_mouse(hid, mouse_buttons, mdx, mdy, 0);
         }
     }
-    for(int i=0;i<cfg.map_count;i++) if(cfg.maps[i].active) set_target(&cfg.maps[i],keyfd,mousefd,0);
+    for(int i=0;i<cfg.map_count;i++) if(cfg.maps[i].active) set_target(&cfg.maps[i],keyfd,hid,&mouse_buttons,0);
+    send_hid_mouse(hid, 0, 0, 0, 0);
 
 cleanup:
     if(grabbed) ioctl(src, EVIOCGRAB, 0);
     logf2("rg505_mapperd stopping");
     if(src>=0) close(src);
     if(keyfd>=0) close(keyfd);
-    if(mousefd>=0) close(mousefd);
     if(hid) pclose(hid);
     unlink(PIDFILE);
     return rc;

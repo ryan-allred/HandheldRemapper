@@ -48,6 +48,11 @@ public class MainActivity extends Activity {
     private static final String PRESETS_JSON = "presets_json";
     private static final String APPLIED_NAME = "applied_name";
     private static final String APPLIED_VERSION = "applied_version";
+    private static final String STATE_SCREEN = "screen";
+    private static final String STATE_PRESET_JSON = "preset_json";
+    private static final String STATE_PRESET_IS_NEW = "preset_is_new";
+    private static final String STATE_PRESET_INDEX = "preset_index";
+    private static final String SCREEN_PRESET = "preset";
     private static final int BG = Color.rgb(247, 248, 250);
     private static final int CARD = Color.WHITE;
     private static final int TEXT = Color.rgb(31, 36, 44);
@@ -68,6 +73,7 @@ public class MainActivity extends Activity {
     private final ArrayList<Preset> presets = new ArrayList<>();
     private Preset editing;
     private boolean editingIsNew;
+    private int editingIndex = -1;
     private EditText nameField, sourceField, mouseXField, mouseYField, centerXField, centerYField, mouseMinXField, mouseMaxXField, mouseMinYField, mouseMaxYField, deadzoneField, speedField, intervalField;
     private LinearLayout mappingsList;
     private MaterialButton learnStickButton, saveButton;
@@ -78,10 +84,34 @@ public class MainActivity extends Activity {
         super.onCreate(b);
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         loadPresets();
+        if (b != null && SCREEN_PRESET.equals(b.getString(STATE_SCREEN))) {
+            Preset restored = Preset.fromJsonString(b.getString(STATE_PRESET_JSON));
+            if (restored != null) {
+                showPreset(restored, b.getBoolean(STATE_PRESET_IS_NEW), b.getInt(STATE_PRESET_INDEX, -1));
+                return;
+            }
+        }
         showGateThenMain();
     }
 
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState);
+        if (editing != null && nameField != null) {
+            collectPreset(editing);
+            outState.putString(STATE_SCREEN, SCREEN_PRESET);
+            outState.putString(STATE_PRESET_JSON, editing.toJsonString());
+            outState.putBoolean(STATE_PRESET_IS_NEW, editingIsNew);
+            outState.putInt(STATE_PRESET_INDEX, editingIndex);
+        }
+    }
+
     private void showGateThenMain() {
+        editing = null;
+        editingIsNew = false;
+        editingIndex = -1;
+        nameField = null;
+        saveButton = null;
         setBase();
         addHeader("RG505 Input Mapper", "Checking backend status");
         addStatus("Checking backend...");
@@ -131,7 +161,7 @@ public class MainActivity extends Activity {
         root.addView(appliedCard);
 
         LinearLayout presetHeader = splitHeader("Presets");
-        presetHeader.addView(button("New preset", false, v -> showPreset(Preset.create("Untitled Preset"), true)), wrap());
+        presetHeader.addView(button("New preset", false, v -> showPreset(Preset.create("Untitled Preset"), true, -1)), wrap());
         root.addView(presetHeader);
 
         if (presets.isEmpty()) {
@@ -157,7 +187,7 @@ public class MainActivity extends Activity {
     private void addPresetRow(Preset p, BackendInfo info) {
         MaterialCardView card = surface();
         card.setClickable(true);
-        card.setOnClickListener(v -> showPreset(p, false));
+        card.setOnClickListener(v -> showPreset(p, false, presets.indexOf(p)));
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
@@ -170,7 +200,7 @@ public class MainActivity extends Activity {
         text.addView(small(p.maps.size() + " mappings - v" + p.version));
         row.addView(text, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
 
-        MaterialButton edit = button("Edit", true, v -> showPreset(p, false));
+        MaterialButton edit = button("Edit", true, v -> showPreset(p, false, presets.indexOf(p)));
         MaterialButton delete = button("Delete", true, v -> confirmDeletePreset(p, info));
         delete.setTextColor(DANGER);
         delete.setStrokeColor(android.content.res.ColorStateList.valueOf(DANGER));
@@ -196,8 +226,13 @@ public class MainActivity extends Activity {
     }
 
     private void showPreset(Preset p, boolean isNew) {
+        showPreset(p, isNew, isNew ? -1 : presets.indexOf(p));
+    }
+
+    private void showPreset(Preset p, boolean isNew, int presetIndex) {
         editing = p;
         editingIsNew = isNew;
+        editingIndex = presetIndex;
         setBase();
         addHeader(isNew ? "New Preset" : "Edit Preset", isNew ? "Save to add it to the preset list." : p.name + " v" + p.version);
 
@@ -255,15 +290,17 @@ public class MainActivity extends Activity {
         mouse.addView(advanced);
         root.addView(mouseCard);
 
-        LinearLayout mappingHeader = splitHeader("Mappings");
-        mappingHeader.addView(button("Add map", false, v -> addMappingRow("Listen", "KEY_SPACE")), wrap());
-        root.addView(mappingHeader);
+        root.addView(section("Mappings"));
         mappingsList = new LinearLayout(this);
         mappingsList.setOrientation(LinearLayout.VERTICAL);
         mappingRows.clear();
         root.addView(mappingsList, full());
         for (MapEntry m : p.maps) addMappingRow(m.input, m.target);
         if (p.maps.isEmpty()) mappingsList.addView(small("No mappings yet."));
+        MaterialButton addMap = button("Add map", false, v -> addMappingRow("Listen", "KEY_SPACE"));
+        LinearLayout.LayoutParams addMapLp = full();
+        addMapLp.setMargins(0, dp(8), 0, 0);
+        root.addView(addMap, addMapLp);
 
         addStatus(isNew ? "Preset is not saved yet." : "");
         attachChangeTracking();
@@ -277,6 +314,9 @@ public class MainActivity extends Activity {
         if (editingIsNew) {
             presets.add(editing);
             editingIsNew = false;
+            editingIndex = presets.size() - 1;
+        } else if (editingIndex >= 0 && editingIndex < presets.size()) {
+            presets.set(editingIndex, editing);
         }
         savePresetsSync();
         updateSaveButton(false);
@@ -295,6 +335,9 @@ public class MainActivity extends Activity {
             editing.version++;
             editing.lastAppliedHash = h;
         }
+        if (editingIndex >= 0 && editingIndex < presets.size()) {
+            presets.set(editingIndex, editing);
+        }
         savePresetsSync();
         final String appliedName = editing.name;
         final int appliedVersion = editing.version;
@@ -302,7 +345,7 @@ public class MainActivity extends Activity {
         String cmd = "cat > " + MODDIR + "/config <<'CFG'\n" + config + "CFG\nsh " + MODDIR + "/mapctl restart";
         runAndShowAsync(cmd, () -> {
             prefs.edit().putString(APPLIED_NAME, appliedName).putInt(APPLIED_VERSION, appliedVersion).commit();
-            showPreset(editing, false);
+            showPreset(editing, false, editingIndex);
             setStatus("Applied " + appliedName + " v" + appliedVersion);
         });
     }
@@ -1301,6 +1344,23 @@ public class MainActivity extends Activity {
             for (MapEntry m : maps) a.put(m.toJson());
             o.put("maps", a);
             return o;
+        }
+
+        String toJsonString() {
+            try {
+                return toJson().toString();
+            } catch (Exception e) {
+                return null;
+            }
+        }
+
+        static Preset fromJsonString(String raw) {
+            if (raw == null) return null;
+            try {
+                return fromJson(new JSONObject(raw));
+            } catch (Exception e) {
+                return null;
+            }
         }
 
         static Preset fromJson(JSONObject o) {

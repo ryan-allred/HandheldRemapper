@@ -13,6 +13,7 @@ TODO: Add a screenshot of the preset editor showing input mappings, the block-or
 ## Features
 
 - Create, edit, save, delete, and apply multiple input presets.
+- Export and import the full preset list as a JSON backup.
 - Apply presets without creating a new preset until the preset is explicitly saved.
 - Map buttons or axis directions to keyboard keys, mouse buttons, and mouse wheel up/down.
 - Learn the mouse-look stick axes and range from live controller input.

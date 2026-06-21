@@ -21,6 +21,10 @@
 #define STR 128
 #define MOUSE_FP 256
 #define MOUSE_BASE_FP 24
+#define WHEEL_NOTCH 120
+#ifndef REL_WHEEL_HI_RES
+#define REL_WHEEL_HI_RES 0x0b
+#endif
 
 static volatile sig_atomic_t g_stop = 0;
 static const char *PIDFILE = "/data/local/tmp/rg505_mapperd.pid";
@@ -63,7 +67,7 @@ static int key_code(const char *s) {
     return -1;
 }
 static int mouse_code(const char *s) { if(!strcmp(s,"MOUSE_LEFT")||!strcmp(s,"BTN_LEFT")) return BTN_LEFT; if(!strcmp(s,"MOUSE_RIGHT")||!strcmp(s,"BTN_RIGHT")) return BTN_RIGHT; if(!strcmp(s,"MOUSE_MIDDLE")||!strcmp(s,"BTN_MIDDLE")) return BTN_MIDDLE; return -1; }
-static int wheel_delta(const char *s) { if(!strcmp(s,"MOUSE_WHEEL_UP")||!strcmp(s,"WHEEL_UP")) return 1; if(!strcmp(s,"MOUSE_WHEEL_DOWN")||!strcmp(s,"WHEEL_DOWN")) return -1; return 0; }
+static int wheel_delta(const char *s) { if(!strcmp(s,"MOUSE_WHEEL_UP")||!strcmp(s,"WHEEL_UP")) return WHEEL_NOTCH; if(!strcmp(s,"MOUSE_WHEEL_DOWN")||!strcmp(s,"WHEEL_DOWN")) return -WHEEL_NOTCH; return 0; }
 static int abs_code(const char *s) { if(!strcmp(s,"ABS_X")) return ABS_X; if(!strcmp(s,"ABS_Y")) return ABS_Y; if(!strcmp(s,"ABS_Z")) return ABS_Z; if(!strcmp(s,"ABS_RX")) return ABS_RX; if(!strcmp(s,"ABS_RY")) return ABS_RY; if(!strcmp(s,"ABS_RZ")) return ABS_RZ; if(!strcmp(s,"ABS_HAT0X")) return ABS_HAT0X; if(!strcmp(s,"ABS_HAT0Y")) return ABS_HAT0Y; return -1; }
 static int src_key_code(const char *s) { int k=key_code(s); if(k>=0) return k; if(!strcmp(s,"BTN_A")||!strcmp(s,"BTN_SOUTH")) return BTN_A; if(!strcmp(s,"BTN_B")||!strcmp(s,"BTN_EAST")) return BTN_B; if(!strcmp(s,"BTN_X")||!strcmp(s,"BTN_NORTH")) return BTN_X; if(!strcmp(s,"BTN_Y")||!strcmp(s,"BTN_WEST")) return BTN_Y; if(!strcmp(s,"BTN_TL")) return BTN_TL; if(!strcmp(s,"BTN_TR")) return BTN_TR; if(!strcmp(s,"BTN_SELECT")) return BTN_SELECT; if(!strcmp(s,"BTN_START")) return BTN_START; return -1; }
 
@@ -147,6 +151,12 @@ static void send_hid_mouse(FILE *hid, int buttons, int dx, int dy, int wheel) {
     fprintf(hid,"{\"id\":2,\"command\":\"report\",\"report\":[0x%02x,0x%02x,0x%02x,0x%02x]}\n", buttons&7, hid_byte(dx), hid_byte(dy), hid_byte(wheel));
     fflush(hid);
 }
+static void send_evdev_wheel(int mousefd, int delta) {
+    if(mousefd<0 || !delta) return;
+    send_ev(mousefd, EV_REL, REL_WHEEL, delta>0?1:-1);
+    send_ev(mousefd, EV_REL, REL_WHEEL_HI_RES, delta);
+    sync_ev(mousefd);
+}
 static int mouse_delta_fp(int raw, int center, int min, int max, int dz, int speed){
     int diff=raw-center;
     int ad=diff<0?-diff:diff;
@@ -171,10 +181,13 @@ static int consume_mouse_delta(int *accum, int delta_fp) {
     *accum -= d*MOUSE_FP;
     return d;
 }
-static void set_target(const Mapping *m, int keyfd, FILE *hid, int *mouse_buttons, int down) {
+static void set_target(const Mapping *m, int keyfd, int mousefd, FILE *hid, int *mouse_buttons, int down) {
     if(m->target_type==TARGET_WHEEL) {
         if(down) {
+            logf2("wheel target %s delta=%d", m->raw, m->target_code);
             send_hid_mouse(hid, *mouse_buttons, 0, 0, m->target_code);
+            send_evdev_wheel(mousefd, m->target_code);
+            usleep(5000);
             send_hid_mouse(hid, *mouse_buttons, 0, 0, 0);
         }
         return;
@@ -205,7 +218,7 @@ int main(int argc, char **argv) {
     FILE *hid=start_hid(&cfg);
     if(!hid){logf2("ERROR starting hid"); return 1;}
 
-    int rc=0, src=-1, keyfd=-1, grabbed=0;
+    int rc=0, src=-1, keyfd=-1, mousefd=-1, grabbed=0;
     char srcpath[128], keypath[128], mousepath[128];
     if(wait_event(cfg.event_name,srcpath,sizeof(srcpath))||wait_event(cfg.output_name,keypath,sizeof(keypath))||wait_event(cfg.output_mouse_name,mousepath,sizeof(mousepath))){
         logf2("ERROR finding event nodes");
@@ -215,7 +228,8 @@ int main(int argc, char **argv) {
     logf2("events source=%s keyboard=%s mouse=%s",srcpath,keypath,mousepath);
     src=open(srcpath,O_RDONLY|O_CLOEXEC);
     keyfd=open(keypath,O_WRONLY|O_CLOEXEC);
-    if(src<0||keyfd<0){
+    mousefd=open(mousepath,O_WRONLY|O_CLOEXEC);
+    if(src<0||keyfd<0||mousefd<0){
         logf2("ERROR open fds: %s",strerror(errno));
         rc=3;
         goto cleanup;
@@ -251,7 +265,7 @@ int main(int argc, char **argv) {
                             }
                             int active=(dir==m->dir);
                             if(active!=m->active){
-                                set_target(m,keyfd,hid,&mouse_buttons,active);
+                                set_target(m,keyfd,mousefd,hid,&mouse_buttons,active);
                                 m->active=active;
                             }
                         }
@@ -270,7 +284,7 @@ int main(int argc, char **argv) {
                         if(m->type==MAP_BUTTON && m->src_code==ev.code){
                             int active=ev.value!=0;
                             if(active!=m->active){
-                                set_target(m,keyfd,hid,&mouse_buttons,active);
+                                set_target(m,keyfd,mousefd,hid,&mouse_buttons,active);
                                 m->active=active;
                             }
                         }
@@ -285,7 +299,7 @@ int main(int argc, char **argv) {
             send_hid_mouse(hid, mouse_buttons, mdx, mdy, 0);
         }
     }
-    for(int i=0;i<cfg.map_count;i++) if(cfg.maps[i].active) set_target(&cfg.maps[i],keyfd,hid,&mouse_buttons,0);
+    for(int i=0;i<cfg.map_count;i++) if(cfg.maps[i].active) set_target(&cfg.maps[i],keyfd,mousefd,hid,&mouse_buttons,0);
     send_hid_mouse(hid, 0, 0, 0, 0);
 
 cleanup:
@@ -293,6 +307,7 @@ cleanup:
     logf2("rg505_mapperd stopping");
     if(src>=0) close(src);
     if(keyfd>=0) close(keyfd);
+    if(mousefd>=0) close(mousefd);
     if(hid) pclose(hid);
     unlink(PIDFILE);
     return rc;

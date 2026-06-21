@@ -2,8 +2,10 @@ package com.gravecow.rg505mapper;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
+import android.net.Uri;
 import android.graphics.Typeface;
 import android.os.Bundle;
 import android.text.Editable;
@@ -54,6 +56,8 @@ public class MainActivity extends Activity {
     private static final String STATE_PRESET_IS_NEW = "preset_is_new";
     private static final String STATE_PRESET_INDEX = "preset_index";
     private static final String SCREEN_PRESET = "preset";
+    private static final int REQ_EXPORT_PRESETS = 1001;
+    private static final int REQ_IMPORT_PRESETS = 1002;
     private static final int BG = Color.rgb(247, 248, 250);
     private static final int CARD = Color.WHITE;
     private static final int TEXT = Color.rgb(31, 36, 44);
@@ -94,6 +98,14 @@ public class MainActivity extends Activity {
             }
         }
         showGateThenMain();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
+        if (requestCode == REQ_EXPORT_PRESETS) exportPresetsTo(data.getData());
+        else if (requestCode == REQ_IMPORT_PRESETS) importPresetsFrom(data.getData());
     }
 
     @Override
@@ -173,6 +185,9 @@ public class MainActivity extends Activity {
         } else {
             for (Preset p : presets) addPresetRow(p, info);
         }
+        MaterialButton importButton = button("Import", true, v -> startImportPresets());
+        MaterialButton exportButton = button("Export", true, v -> startExportPresets());
+        root.addView(buttonRow(importButton, exportButton));
 
         root.addView(section("Backend"));
         MaterialButton restart = button("Restart", true, v -> runAndShowAsync("sh " + MODDIR + "/mapctl restart"));
@@ -225,6 +240,56 @@ public class MainActivity extends Activity {
                     showMain(info);
                 })
                 .show();
+    }
+
+    private void startExportPresets() {
+        Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("application/json");
+        i.putExtra(Intent.EXTRA_TITLE, "handheld-remapper-presets.json");
+        startActivityForResult(i, REQ_EXPORT_PRESETS);
+    }
+
+    private void startImportPresets() {
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("application/json");
+        startActivityForResult(i, REQ_IMPORT_PRESETS);
+    }
+
+    private void exportPresetsTo(Uri uri) {
+        try {
+            OutputStream out = getContentResolver().openOutputStream(uri);
+            if (out == null) throw new IOException("Could not open export file.");
+            out.write(presetsExportJson().getBytes("UTF-8"));
+            out.close();
+            setStatus("Exported " + presets.size() + " presets.");
+        } catch (Exception e) {
+            setStatus("Export failed: " + e.getMessage());
+        }
+    }
+
+    private void importPresetsFrom(Uri uri) {
+        try {
+            InputStream in = getContentResolver().openInputStream(uri);
+            if (in == null) throw new IOException("Could not open import file.");
+            String raw = readAll(in);
+            ArrayList<Preset> imported = parsePresetImport(raw);
+            new AlertDialog.Builder(this)
+                    .setTitle("Import presets?")
+                    .setMessage("Replace " + presets.size() + " presets with " + imported.size() + " imported presets.")
+                    .setNegativeButton("Cancel", null)
+                    .setPositiveButton("Import", (d, which) -> {
+                        presets.clear();
+                        presets.addAll(imported);
+                        prefs.edit().remove(APPLIED_NAME).remove(APPLIED_VERSION).commit();
+                        savePresetsSync();
+                        showGateThenMain();
+                    })
+                    .show();
+        } catch (Exception e) {
+            setStatus("Import failed: " + e.getMessage());
+        }
     }
 
     private void showPreset(Preset p, boolean isNew) {
@@ -962,6 +1027,46 @@ public class MainActivity extends Activity {
             for (Preset p : presets) arr.put(p.toJson());
             prefs.edit().putString(PRESETS_JSON, arr.toString()).commit();
         } catch (Exception ignored) {
+        }
+    }
+
+    private String presetsExportJson() throws JSONException {
+        JSONArray arr = new JSONArray();
+        for (Preset p : presets) arr.put(p.toJson());
+        JSONObject out = new JSONObject();
+        out.put("format", "handheld-remapper-presets");
+        out.put("version", 1);
+        out.put("presets", arr);
+        return out.toString(2);
+    }
+
+    private ArrayList<Preset> parsePresetImport(String raw) throws JSONException {
+        raw = raw == null ? "" : raw.trim();
+        JSONArray arr;
+        if (raw.startsWith("[")) {
+            arr = new JSONArray(raw);
+        } else {
+            JSONObject root = new JSONObject(raw);
+            arr = root.optJSONArray("presets");
+            if (arr == null) throw new JSONException("No presets array found.");
+        }
+        ArrayList<Preset> imported = new ArrayList<>();
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject o = arr.optJSONObject(i);
+            if (o != null) imported.add(Preset.fromJson(o));
+        }
+        return imported;
+    }
+
+    private String readAll(InputStream in) throws IOException {
+        try {
+            ByteArrayOutputStream b = new ByteArrayOutputStream();
+            byte[] buf = new byte[4096];
+            int n;
+            while ((n = in.read(buf)) != -1) b.write(buf, 0, n);
+            return b.toString("UTF-8");
+        } finally {
+            in.close();
         }
     }
 

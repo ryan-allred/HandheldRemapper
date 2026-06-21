@@ -1,6 +1,6 @@
 id=rg505_dpad_wasd
 name=Handheld Remapper Backend
-version=4.5-branding
-versionCode=45
+version=4.6-wheel-detents
+versionCode=46
 author=ChatGPT
-description=Native daemon backend for handheld controller remapping.
+description=Native daemon backend with wheel detent output for handheld remapping.

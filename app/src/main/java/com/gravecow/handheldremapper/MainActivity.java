@@ -389,7 +389,7 @@ public class MainActivity extends Activity {
         mappingsList.setOrientation(LinearLayout.VERTICAL);
         mappingRows.clear();
         root.addView(mappingsList, full());
-        for (MapEntry m : p.maps) addMappingRow(m.input, m.target);
+        for (MapEntry m : p.maps) addMappingRow(m.input, m.target, m.displayInput());
         if (p.maps.isEmpty()) mappingsList.addView(small("No mappings yet."));
         MaterialButton addMap = button("Add map", false, v -> addMappingRow("Listen", "KEY_SPACE"));
         LinearLayout.LayoutParams addMapLp = full();
@@ -460,10 +460,11 @@ public class MainActivity extends Activity {
         p.blockOriginalInput = blockOriginalField == null || blockOriginalField.isChecked();
         p.maps.clear();
         for (MappingRow r : mappingRows) {
-            String in = r.inputButton.getText().toString().trim();
+            String in = r.inputValue == null ? "" : r.inputValue.trim();
+            String display = r.inputButton.getText().toString().trim();
             String target = r.target.getText().toString().trim();
             if ((in.startsWith("button:") || in.startsWith("axis:")) && target.length() > 0) {
-                p.maps.add(new MapEntry(in, target));
+                p.maps.add(new MapEntry(in, target, display));
             }
         }
     }
@@ -502,6 +503,10 @@ public class MainActivity extends Activity {
     }
 
     private void addMappingRow(String input, String target) {
+        addMappingRow(input, target, input);
+    }
+
+    private void addMappingRow(String input, String target, String displayInput) {
         if (mappingsList.getChildCount() == 1 && mappingsList.getChildAt(0) instanceof TextView && mappingRows.isEmpty()) {
             mappingsList.removeAllViews();
         }
@@ -513,7 +518,7 @@ public class MainActivity extends Activity {
         row.setPadding(dp(10), dp(10), dp(10), dp(10));
         card.addView(row, frameFull());
 
-        MaterialButton listen = button(input == null || input.length() == 0 ? "Listen" : input, true, null);
+        MaterialButton listen = button(displayInput == null || displayInput.length() == 0 ? "Listen" : displayInput, true, null);
         listen.setSingleLine(false);
         listen.setMaxLines(2);
         AutoCompleteTextView targetField = new AutoCompleteTextView(this);
@@ -533,6 +538,7 @@ public class MainActivity extends Activity {
 
         MaterialButton remove = button("X", true, null);
         MappingRow mr = new MappingRow(card, listen, targetField);
+        mr.inputValue = input;
         mappingRows.add(mr);
         listen.setOnClickListener(v -> listenForInput(mr));
         remove.setTextColor(DANGER);
@@ -558,17 +564,24 @@ public class MainActivity extends Activity {
         row.inputButton.setText("Listening...\npress or move");
         String source = sourceField != null ? sourceField.getText().toString() : "Xbox Wireless Controller";
         new Thread(() -> {
-            DetectedInput detected = detectInput(source, 12);
+            boolean wasRunning = stopBackendForCapture();
+            DetectedInput detected;
+            try {
+                detected = detectInput(source, 12);
+            } finally {
+                restoreBackendAfterCapture(wasRunning);
+            }
             runOnUiThread(() -> {
                 row.inputButton.setClickable(true);
                 if (detected == null) {
                     row.inputButton.setText("Timed out\nTap to retry");
                     setStatus("No input detected.");
                 } else {
-                    row.inputButton.setText(detected.input);
+                    row.inputValue = detected.input;
+                    row.inputButton.setText(detected.display);
                     if (sourceField != null && detected.deviceName.length() > 0) sourceField.setText(detected.deviceName);
                     markDirty();
-                    setStatus("Detected " + detected.input);
+                    setStatus("Detected " + detected.display);
                 }
             });
         }).start();
@@ -580,6 +593,7 @@ public class MainActivity extends Activity {
         String source = sourceField != null ? sourceField.getText().toString() : "Xbox Wireless Controller";
         if (learnStickButton != null) learnStickButton.setClickable(false);
         new Thread(() -> {
+            boolean wasRunning = stopBackendForCapture();
             try {
                 DeviceInfo device = findDeviceInfo(source);
                 if (device == null) {
@@ -639,6 +653,8 @@ public class MainActivity extends Activity {
                     if (learnStickButton != null) learnStickButton.setClickable(true);
                     setStatus("Learn failed: " + e);
                 });
+            } finally {
+                restoreBackendAfterCapture(wasRunning);
             }
         }).start();
     }
@@ -699,28 +715,70 @@ public class MainActivity extends Activity {
     }
 
     private DetectedInput captureDetectedInput(DeviceInfo device, int timeoutSeconds) {
-        Process p = null;
+        Process rawProcess = null;
+        Process labeledProcess = null;
         try {
-            p = new ProcessBuilder("su", "-c", "getevent " + device.path).redirectErrorStream(true).start();
-            destroyAfterTimeout(p, timeoutSeconds);
-            BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
-            String line;
-            while ((line = reader.readLine()) != null) {
-                EventLine event = parseEventLine(line);
-                if (event == null) continue;
-                if ("EV_KEY".equals(event.type) && event.value != 0) {
-                    return new DetectedInput("button:" + event.code, device.name);
+            rawProcess = new ProcessBuilder("su", "-c", "getevent " + device.path).redirectErrorStream(true).start();
+            labeledProcess = new ProcessBuilder("su", "-c", "getevent -l " + device.path).redirectErrorStream(true).start();
+            destroyAfterTimeout(rawProcess, timeoutSeconds);
+            destroyAfterTimeout(labeledProcess, timeoutSeconds);
+            BufferedReader rawReader = new BufferedReader(new InputStreamReader(rawProcess.getInputStream()));
+            BufferedReader labeledReader = new BufferedReader(new InputStreamReader(labeledProcess.getInputStream()));
+            long deadline = System.currentTimeMillis() + timeoutSeconds * 1000L;
+            while (System.currentTimeMillis() < deadline) {
+                if (rawReader.ready()) {
+                    EventLine raw = parseEventLine(rawReader.readLine());
+                    if (!isMappingInput(raw)) continue;
+                    EventLine label = readMatchingEvent(labeledReader, raw, 350);
+                    return detectedFromEvents(raw, label, device.name);
                 }
-                if ("EV_ABS".equals(event.type)) {
-                    String dir = axisDirection(event.code, event.value);
-                    if (dir != null) return new DetectedInput("axis:" + event.code + ":" + dir, device.name);
+                if (labeledReader.ready()) {
+                    EventLine label = parseEventLine(labeledReader.readLine());
+                    if (!isMappingInput(label)) continue;
+                    EventLine raw = readMatchingEvent(rawReader, label, 350);
+                    return detectedFromEvents(raw == null ? label : raw, label, device.name);
                 }
+                sleepMs(20);
             }
         } catch (Exception ignored) {
         } finally {
-            if (p != null) p.destroy();
+            if (rawProcess != null) rawProcess.destroy();
+            if (labeledProcess != null) labeledProcess.destroy();
         }
         return null;
+    }
+
+    private boolean isMappingInput(EventLine event) {
+        if (event == null) return false;
+        if ("EV_KEY".equals(event.type)) return event.value != 0;
+        if ("EV_ABS".equals(event.type)) return axisDirection(event.code, event.value) != null;
+        return false;
+    }
+
+    private EventLine readMatchingEvent(BufferedReader reader, EventLine reference, int waitMs) throws IOException {
+        long deadline = System.currentTimeMillis() + waitMs;
+        while (System.currentTimeMillis() < deadline) {
+            if (!reader.ready()) {
+                sleepMs(10);
+                continue;
+            }
+            EventLine event = parseEventLine(reader.readLine());
+            if (event != null && reference != null && reference.type.equals(event.type)) return event;
+        }
+        return null;
+    }
+
+    private DetectedInput detectedFromEvents(EventLine raw, EventLine label, String deviceName) {
+        EventLine config = raw == null ? label : raw;
+        EventLine display = label == null ? config : label;
+        if (config == null) return null;
+        if ("EV_KEY".equals(config.type)) {
+            return new DetectedInput("button:" + config.code, display == null ? "button:" + config.code : "button:" + display.code, deviceName);
+        }
+        String dir = axisDirection(config.code, config.value);
+        if (dir == null && display != null) dir = axisDirection(display.code, display.value);
+        if (dir == null) return null;
+        return new DetectedInput("axis:" + config.code + ":" + dir, display == null ? "axis:" + config.code + ":" + dir : "axis:" + display.code + ":" + dir, deviceName);
     }
 
     private AxisSample captureAxisSample(DeviceInfo device, int timeoutSeconds, String requiredAxis, int requiredSign, String ignoredAxis) {
@@ -981,6 +1039,23 @@ public class MainActivity extends Activity {
 
     private String applyConfigCommand(Preset p) {
         return "cat > " + MODDIR + "/config <<'CFG'\n" + p.toConfig() + "CFG\nsh " + MODDIR + "/mapctl restart";
+    }
+
+    private boolean stopBackendForCapture() {
+        boolean running = isBackendRunning();
+        if (running) runRootCaptureSilent("test -x " + MODDIR + "/mapctl && sh " + MODDIR + "/mapctl stop || true");
+        return running;
+    }
+
+    private void restoreBackendAfterCapture(boolean wasRunning) {
+        if (!wasRunning) return;
+        Preset applied = findAppliedPreset();
+        runRootCaptureSilent(applied == null ? "test -x " + MODDIR + "/mapctl && sh " + MODDIR + "/mapctl start || true" : applyConfigCommand(applied));
+    }
+
+    private boolean isBackendRunning() {
+        String out = runRootCaptureSilent("p=$(cat /data/local/tmp/handheld_remapperd.pid 2>/dev/null); [ -n \"$p\" ] && kill -0 \"$p\" 2>/dev/null && echo running || true");
+        return out.contains("running");
     }
 
     private void runAndShowAsync(String cmd) {
@@ -1360,6 +1435,7 @@ public class MainActivity extends Activity {
         MaterialCardView row;
         MaterialButton inputButton;
         AutoCompleteTextView target;
+        String inputValue;
         MappingRow(MaterialCardView r, MaterialButton b, AutoCompleteTextView t) {
             row = r;
             inputButton = b;
@@ -1387,9 +1463,10 @@ public class MainActivity extends Activity {
     }
 
     private static class DetectedInput {
-        String input, deviceName;
-        DetectedInput(String i, String d) {
+        String input, display, deviceName;
+        DetectedInput(String i, String displayText, String d) {
             input = i;
+            display = displayText;
             deviceName = d;
         }
     }
@@ -1437,19 +1514,27 @@ public class MainActivity extends Activity {
     }
 
     private static class MapEntry {
-        String input, target;
+        String input, target, display;
         MapEntry(String i, String t) {
+            this(i, t, i);
+        }
+        MapEntry(String i, String t, String d) {
             input = i;
             target = t;
+            display = d;
+        }
+        String displayInput() {
+            return display == null || display.length() == 0 ? input : display;
         }
         JSONObject toJson() throws JSONException {
             JSONObject o = new JSONObject();
             o.put("input", input);
             o.put("target", target);
+            o.put("display", displayInput());
             return o;
         }
         static MapEntry fromJson(JSONObject o) {
-            return new MapEntry(o.optString("input"), o.optString("target"));
+            return new MapEntry(o.optString("input"), o.optString("target"), o.optString("display", o.optString("input")));
         }
     }
 

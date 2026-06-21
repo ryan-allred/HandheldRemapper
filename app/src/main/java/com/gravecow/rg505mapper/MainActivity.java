@@ -361,9 +361,9 @@ public class MainActivity extends Activity {
         p.mouseMaxX = num(mouseMaxXField, 32767);
         p.mouseMinY = num(mouseMinYField, -32768);
         p.mouseMaxY = num(mouseMaxYField, 32767);
-        p.deadzone = num(deadzoneField, 200);
-        p.speed = num(speedField, 1);
-        p.intervalMs = num(intervalField, 8);
+        p.deadzone = num(deadzoneField, 50);
+        p.speed = num(speedField, 8);
+        p.intervalMs = num(intervalField, 1);
         p.maps.clear();
         for (MappingRow r : mappingRows) {
             String in = r.inputButton.getText().toString().trim();
@@ -530,9 +530,9 @@ public class MainActivity extends Activity {
                     mouseMinYField.setText(String.valueOf(yCal.min));
                     mouseMaxYField.setText(String.valueOf(yCal.max));
                     String dz = deadzoneField.getText().toString().trim();
-                    if (dz.isEmpty() || "200".equals(dz)) deadzoneField.setText(String.valueOf(defaultDeadzone(xCal.min, xCal.max, yCal.min, yCal.max)));
-                    if (speedField.getText().toString().trim().isEmpty()) speedField.setText("1");
-                    if (intervalField.getText().toString().trim().isEmpty()) intervalField.setText("8");
+                    if (dz.isEmpty() || "200".equals(dz)) deadzoneField.setText("50");
+                    if (speedField.getText().toString().trim().isEmpty()) speedField.setText("8");
+                    if (intervalField.getText().toString().trim().isEmpty()) intervalField.setText("1");
                     setLearnText("Learned " + xAxis + " / " + yAxis + "\nTap to relearn");
                     if (learnStickButton != null) learnStickButton.setClickable(true);
                     markDirty();
@@ -577,12 +577,6 @@ public class MainActivity extends Activity {
 
     private boolean validOppositePair(AxisSample a, AxisSample b) {
         return sameAxis(a, b) && a.sign != 0 && b.sign != 0 && a.sign == -b.sign;
-    }
-
-    private int defaultDeadzone(int minX, int maxX, int minY, int maxY) {
-        int x = Math.max(1, maxX - minX);
-        int y = Math.max(1, maxY - minY);
-        return Math.max(4, Math.min(x, y) / 12);
     }
 
     private AxisCalibration calibrateAxis(AxisSample a, AxisSample b) {
@@ -1290,7 +1284,7 @@ public class MainActivity extends Activity {
 
     private static class Preset {
         String name = "Preset", sourceName = "Xbox Wireless Controller", mouseAxisX = "ABS_Z", mouseAxisY = "ABS_RZ", lastAppliedHash = "";
-        int version = 0, centerX = 0, centerY = 0, mouseMinX = -32768, mouseMaxX = 32767, mouseMinY = -32768, mouseMaxY = 32767, deadzone = 200, speed = 1, intervalMs = 8;
+        int version = 0, centerX = 0, centerY = 0, mouseMinX = -32768, mouseMaxX = 32767, mouseMinY = -32768, mouseMaxY = 32767, deadzone = 50, speed = 8, intervalMs = 1;
         ArrayList<MapEntry> maps = new ArrayList<>();
 
         static Preset create(String name) {
@@ -1376,9 +1370,9 @@ public class MainActivity extends Activity {
             p.mouseMaxX = o.optInt("mouseMaxX", 32767);
             p.mouseMinY = o.optInt("mouseMinY", -32768);
             p.mouseMaxY = o.optInt("mouseMaxY", 32767);
-            p.deadzone = o.optInt("deadzone", 200);
-            p.speed = o.optInt("speed", 1);
-            p.intervalMs = o.optInt("intervalMs", 8);
+            p.deadzone = o.optInt("deadzone", 50);
+            p.speed = o.optInt("speed", 8);
+            p.intervalMs = o.optInt("intervalMs", 1);
             p.lastAppliedHash = o.optString("lastAppliedHash", "");
             JSONArray a = o.optJSONArray("maps");
             if (a != null) for (int i = 0; i < a.length(); i++) p.maps.add(MapEntry.fromJson(a.optJSONObject(i)));

@@ -13,7 +13,9 @@ Android app + Magisk backend for GammaOS/Anbernic RG505 input remapping.
 ## Build on GitHub
 
 Push this repo to GitHub and run the `Build APK` workflow from the Actions tab. The workflow compiles the native ARM64 daemon and builds `app-debug.apk`.
+GitHub APKs are signed with the checked-in development update key and use the GitHub run number as the Android `versionCode`, so future artifacts can update the installed app in place.
 
 ## On device
 
 Install the APK on the RG505, grant root, and tap Install or Update. Create/edit a preset, tap Apply, then restart if needed after launching the game.
+If you installed an older artifact signed by a random debug key, Android may require one final uninstall before the first APK signed with this repo key can be installed. After that, updates should install over the previous app.

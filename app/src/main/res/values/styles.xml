@@ -1,5 +1,5 @@
 <resources>
-    <style name="AppTheme" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+    <style name="AppTheme" parent="Theme.MaterialComponents.Light.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:windowBackground">#F7F8FA</item>
         <item name="android:navigationBarColor">#F7F8FA</item>
@@ -9,6 +9,8 @@
         <item name="colorPrimaryVariant">#1D469D</item>
         <item name="colorSecondary">#1F7A5A</item>
         <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="android:textColorPrimary">#1F242C</item>
+        <item name="android:textColorSecondary">#5C6573</item>
         <item name="android:colorAccent">#2457C5</item>
     </style>
 </resources>

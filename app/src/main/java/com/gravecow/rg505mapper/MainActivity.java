@@ -27,10 +27,12 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.security.MessageDigest;
 import java.util.ArrayList;
@@ -324,6 +326,8 @@ public class MainActivity extends Activity {
         targetField.setText(target);
         targetField.setHint("Target");
         targetField.setTextSize(15);
+        targetField.setTextColor(TEXT);
+        targetField.setHintTextColor(MUTED);
         targetField.setInputType(InputType.TYPE_CLASS_TEXT);
         targetField.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_dropdown_item_1line, TARGETS));
 
@@ -348,18 +352,16 @@ public class MainActivity extends Activity {
     }
 
     private void listenForInput(MappingRow row) {
-        String previous = row.inputButton.getText().toString();
-        row.inputButton.setEnabled(false);
+        row.inputButton.setClickable(false);
         row.inputButton.setText("Listening...\npress or move");
-        output.setText("Listening for input...");
         String source = sourceField != null ? sourceField.getText().toString() : "Xbox Wireless Controller";
         new Thread(() -> {
-            DetectedInput detected = detectInput(source, 5);
+            DetectedInput detected = detectInput(source, 12);
             runOnUiThread(() -> {
-                row.inputButton.setEnabled(true);
+                row.inputButton.setClickable(true);
                 if (detected == null) {
-                    row.inputButton.setText(previous);
-                    output.setText("No input detected. Try again and hold the input until the button updates.");
+                    row.inputButton.setText("Timed out\nTap to retry");
+                    output.setText("No input detected.");
                 } else {
                     row.inputButton.setText(detected.input);
                     if (sourceField != null && detected.deviceName.length() > 0) sourceField.setText(detected.deviceName);
@@ -373,14 +375,14 @@ public class MainActivity extends Activity {
         setLearnText("Center stick...");
         output.setText("Learning stick axes...");
         String source = sourceField != null ? sourceField.getText().toString() : "Xbox Wireless Controller";
-        if (learnStickButton != null) learnStickButton.setEnabled(false);
+        if (learnStickButton != null) learnStickButton.setClickable(false);
         new Thread(() -> {
             try {
                 DeviceInfo device = findDeviceInfo(source);
                 if (device == null) {
                     runOnUiThread(() -> {
                         setLearnText("No controller found - Try again");
-                        if (learnStickButton != null) learnStickButton.setEnabled(true);
+                        if (learnStickButton != null) learnStickButton.setClickable(true);
                         output.setText("No input device matched the source name.");
                     });
                     return;
@@ -399,7 +401,7 @@ public class MainActivity extends Activity {
                 runOnUiThread(() -> {
                     if (left == null || right == null || up == null || down == null) {
                         setLearnText("Incomplete - Tap to retry");
-                        if (learnStickButton != null) learnStickButton.setEnabled(true);
+                        if (learnStickButton != null) learnStickButton.setClickable(true);
                         output.setText("Could not detect all stick directions.");
                         return;
                     }
@@ -413,13 +415,13 @@ public class MainActivity extends Activity {
                     if (speedField.getText().toString().trim().isEmpty()) speedField.setText("1");
                     if (intervalField.getText().toString().trim().isEmpty()) intervalField.setText("8");
                     setLearnText("Learned " + xAxis + " / " + yAxis + "\nTap to relearn");
-                    if (learnStickButton != null) learnStickButton.setEnabled(true);
+                    if (learnStickButton != null) learnStickButton.setClickable(true);
                     output.setText("Learned stick axes from " + device.name);
                 });
             } catch (Exception e) {
                 runOnUiThread(() -> {
                     setLearnText("Learn failed - Tap to retry");
-                    if (learnStickButton != null) learnStickButton.setEnabled(true);
+                    if (learnStickButton != null) learnStickButton.setClickable(true);
                     output.setText("Learn failed: " + e);
                 });
             }
@@ -439,19 +441,7 @@ public class MainActivity extends Activity {
     }
 
     private AxisSample sampleAxis(DeviceInfo device) {
-        String out = runRootCaptureSilent("timeout 3 getevent -l " + device.path);
-        return largestAbs(out);
-    }
-
-    private AxisSample largestAbs(String out) {
-        AxisSample best = null;
-        for (String line : out.split("\\n")) {
-            EventLine event = parseEventLine(line);
-            if (event == null || !"EV_ABS".equals(event.type)) continue;
-            AxisSample sample = new AxisSample(event.code, event.value);
-            if (best == null || Math.abs(sample.value) > Math.abs(best.value)) best = sample;
-        }
-        return best;
+        return captureAxisSample(device, 8);
     }
 
     private String centerFor(int a, int b) {
@@ -468,19 +458,62 @@ public class MainActivity extends Activity {
     private DetectedInput detectInput(String sourceName, int seconds) {
         DeviceInfo device = findDeviceInfo(sourceName);
         if (device == null) return null;
-        String out = runRootCaptureSilent("timeout " + seconds + " getevent -l " + device.path);
-        for (String line : out.split("\\n")) {
-            EventLine event = parseEventLine(line);
-            if (event == null) continue;
-            if ("EV_KEY".equals(event.type) && event.value != 0) {
-                return new DetectedInput("button:" + event.code, device.name);
+        return captureDetectedInput(device, seconds);
+    }
+
+    private DetectedInput captureDetectedInput(DeviceInfo device, int timeoutSeconds) {
+        Process p = null;
+        try {
+            p = new ProcessBuilder("su", "-c", "getevent -l " + device.path).redirectErrorStream(true).start();
+            destroyAfterTimeout(p, timeoutSeconds);
+            BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
+            String line;
+            while ((line = reader.readLine()) != null) {
+                EventLine event = parseEventLine(line);
+                if (event == null) continue;
+                if ("EV_KEY".equals(event.type) && event.value != 0) {
+                    return new DetectedInput("button:" + event.code, device.name);
+                }
+                if ("EV_ABS".equals(event.type)) {
+                    String dir = axisDirection(event.code, event.value);
+                    if (dir != null) return new DetectedInput("axis:" + event.code + ":" + dir, device.name);
+                }
             }
-            if ("EV_ABS".equals(event.type)) {
-                String dir = axisDirection(event.code, event.value);
-                if (dir != null) return new DetectedInput("axis:" + event.code + ":" + dir, device.name);
-            }
+        } catch (Exception ignored) {
+        } finally {
+            if (p != null) p.destroy();
         }
         return null;
+    }
+
+    private AxisSample captureAxisSample(DeviceInfo device, int timeoutSeconds) {
+        Process p = null;
+        try {
+            p = new ProcessBuilder("su", "-c", "getevent -l " + device.path).redirectErrorStream(true).start();
+            destroyAfterTimeout(p, timeoutSeconds);
+            BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
+            String line;
+            while ((line = reader.readLine()) != null) {
+                EventLine event = parseEventLine(line);
+                if (event != null && "EV_ABS".equals(event.type)) {
+                    return new AxisSample(event.code, event.value);
+                }
+            }
+        } catch (Exception ignored) {
+        } finally {
+            if (p != null) p.destroy();
+        }
+        return null;
+    }
+
+    private void destroyAfterTimeout(Process process, int timeoutSeconds) {
+        new Thread(() -> {
+            sleepMs(timeoutSeconds * 1000L);
+            try {
+                process.destroy();
+            } catch (Exception ignored) {
+            }
+        }).start();
     }
 
     private String axisDirection(String code, int value) {
@@ -491,10 +524,11 @@ public class MainActivity extends Activity {
         if (center != 0) {
             if (value > center) return "+";
             if (value < center) return "-";
+            return null;
         }
         if (value > 0) return "+";
         if (value < 0) return "-";
-        return code.startsWith("ABS_HAT") ? null : "-";
+        return null;
     }
 
     private EventLine parseEventLine(String line) {
@@ -771,6 +805,8 @@ public class MainActivity extends Activity {
         e.setSingleLine(true);
         e.setText(s);
         e.setTextSize(15);
+        e.setTextColor(TEXT);
+        e.setHintTextColor(MUTED);
         e.setInputType(InputType.TYPE_CLASS_TEXT);
         return e;
     }
@@ -819,9 +855,13 @@ public class MainActivity extends Activity {
         b.setInsetBottom(0);
         b.setGravity(Gravity.CENTER);
         if (outlined) {
+            b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(CARD));
             b.setTextColor(PRIMARY);
             b.setStrokeColor(android.content.res.ColorStateList.valueOf(PRIMARY));
             b.setStrokeWidth(dp(1));
+        } else {
+            b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(PRIMARY));
+            b.setTextColor(Color.WHITE);
         }
         if (l != null) b.setOnClickListener(l);
         return b;

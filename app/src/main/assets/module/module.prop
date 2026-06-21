@@ -1,6 +1,6 @@
 id=handheld_remapper
 name=Handheld Remapper Backend
-version=5.4-numeric-input-codes
-versionCode=54
+version=5.5-daemon-listener
+versionCode=55
 author=ChatGPT
 description=Native daemon backend for Handheld Remapper.

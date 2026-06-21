@@ -29,6 +29,8 @@
 static volatile sig_atomic_t g_stop = 0;
 static const char *PIDFILE = "/data/local/tmp/handheld_remapperd.pid";
 static const char *STOPFILE = "/data/local/tmp/handheld_remapperd.disabled";
+static const char *LISTEN_REQUEST = "/data/local/tmp/handheld_remapperd.listen";
+static const char *LISTEN_RESULT = "/data/local/tmp/handheld_remapperd.listen.result";
 
 typedef enum { MAP_AXIS, MAP_BUTTON } MapType;
 typedef enum { TARGET_KEY, TARGET_MOUSE, TARGET_WHEEL } TargetType;
@@ -160,6 +162,52 @@ static int find_event_by_name(const char *name, char *out, size_t outsz) { FILE 
 static int wait_event(const char *name, char *out, size_t outsz) { for(int i=0;i<100;i++){ if(find_event_by_name(name,out,outsz)==0) return 0; usleep(100000); } return -1; }
 static int send_ev(int fd, uint16_t type, uint16_t code, int32_t value) { struct input_event ev; memset(&ev,0,sizeof(ev)); gettimeofday(&ev.time,NULL); ev.type=type; ev.code=code; ev.value=value; return write(fd,&ev,sizeof(ev))==(ssize_t)sizeof(ev)?0:-1; }
 static void sync_ev(int fd){ send_ev(fd,EV_SYN,SYN_REPORT,0); }
+static int listen_requested(void) { return access(LISTEN_REQUEST,F_OK)==0; }
+static void write_listen_result(const char *result) {
+    FILE *f=fopen(LISTEN_RESULT,"w");
+    if(f){fprintf(f,"%s\n",result); fclose(f);}
+    unlink(LISTEN_REQUEST);
+    logf2("listen captured %s", result);
+}
+static int listen_axis_dir(const Config *c, int mx_code, int my_code, const struct input_event *ev) {
+    if(ev->code==ABS_HAT0X || ev->code==ABS_HAT0Y) {
+        if(ev->value>0) return 1;
+        if(ev->value<0) return -1;
+        return 0;
+    }
+    int center=0, threshold=0;
+    if(ev->code==mx_code) {
+        center=c->mouse_center_x;
+        threshold=c->mouse_deadzone;
+    } else if(ev->code==my_code) {
+        center=c->mouse_center_y;
+        threshold=c->mouse_deadzone;
+    }
+    int diff=ev->value-center;
+    if(diff>threshold) return 1;
+    if(diff<-threshold) return -1;
+    return 0;
+}
+static int handle_listen_event(const Config *c, int mx_code, int my_code, const struct input_event *ev) {
+    if(!listen_requested()) return 0;
+    char result[64];
+    if(ev->type==EV_KEY) {
+        if(ev->value!=0) {
+            snprintf(result,sizeof(result),"button:%d",ev->code);
+            write_listen_result(result);
+        }
+        return 1;
+    }
+    if(ev->type==EV_ABS) {
+        int dir=listen_axis_dir(c,mx_code,my_code,ev);
+        if(dir) {
+            snprintf(result,sizeof(result),"axis:%d:%c",ev->code,dir>0?'+':'-');
+            write_listen_result(result);
+        }
+        return 1;
+    }
+    return 0;
+}
 static int clamp_hid_rel(int v) { if(v>127)return 127; if(v<-127)return -127; return v; }
 static int hid_byte(int v) { return clamp_hid_rel(v)&0xff; }
 static int mouse_button_bit(int code) { if(code==BTN_LEFT)return 1; if(code==BTN_RIGHT)return 2; if(code==BTN_MIDDLE)return 4; if(code==BTN_SIDE)return 8; if(code==BTN_EXTRA)return 16; if(code==BTN_FORWARD)return 32; if(code==BTN_BACK)return 64; if(code==BTN_TASK)return 128; if(code>=BTN_MOUSE&&code<BTN_MOUSE+8)return 1<<(code-BTN_MOUSE); return 0; }
@@ -268,6 +316,7 @@ int main(int argc, char **argv) {
         if(pr>0 && (pfd.revents&POLLIN)){
             struct input_event ev;
             while(read(src,&ev,sizeof(ev))==(ssize_t)sizeof(ev)){
+                if(handle_listen_event(&cfg,mx_code,my_code,&ev)) continue;
                 if(ev.type==EV_ABS){
                     for(int i=0;i<cfg.map_count;i++){
                         Mapping *m=&cfg.maps[i];

@@ -564,24 +564,21 @@ public class MainActivity extends Activity {
         row.inputButton.setText("Listening...\npress or move");
         String source = sourceField != null ? sourceField.getText().toString() : "Xbox Wireless Controller";
         new Thread(() -> {
-            boolean wasRunning = stopBackendForCapture();
-            DetectedInput detected;
-            try {
-                detected = detectInput(source, 12);
-            } finally {
-                restoreBackendAfterCapture(wasRunning);
-            }
+            boolean backendRunning = isBackendRunning();
+            DetectedInput detected = backendRunning ? detectInputViaDaemon(source, 12) : null;
+            if (detected == null && !backendRunning) detected = detectInput(source, 12);
+            final DetectedInput captured = detected;
             runOnUiThread(() -> {
                 row.inputButton.setClickable(true);
-                if (detected == null) {
+                if (captured == null) {
                     row.inputButton.setText("Timed out\nTap to retry");
                     setStatus("No input detected.");
                 } else {
-                    row.inputValue = detected.input;
-                    row.inputButton.setText(detected.display);
-                    if (sourceField != null && detected.deviceName.length() > 0) sourceField.setText(detected.deviceName);
+                    row.inputValue = captured.input;
+                    row.inputButton.setText(captured.display);
+                    if (sourceField != null && captured.deviceName.length() > 0) sourceField.setText(captured.deviceName);
                     markDirty();
-                    setStatus("Detected " + detected.display);
+                    setStatus("Detected " + captured.display);
                 }
             });
         }).start();
@@ -712,6 +709,136 @@ public class MainActivity extends Activity {
         DeviceInfo device = findDeviceInfo(sourceName);
         if (device == null) return null;
         return captureDetectedInput(device, seconds);
+    }
+
+    private DetectedInput detectInputViaDaemon(String sourceName, int seconds) {
+        DeviceInfo device = findDeviceInfo(sourceName);
+        String out = runRootCaptureSilent("test -x " + MODDIR + "/mapctl && sh " + MODDIR + "/mapctl listen " + seconds);
+        String input = extractDetectedInput(out);
+        if (input == null) return null;
+        String display = friendlyInput(input);
+        return new DetectedInput(input, display, device == null ? "" : device.name);
+    }
+
+    private String extractDetectedInput(String out) {
+        if (out == null) return null;
+        String found = null;
+        for (String line : out.split("\\n")) {
+            line = line.trim();
+            if (line.startsWith("button:") || line.startsWith("axis:")) found = line;
+        }
+        return found;
+    }
+
+    private String friendlyInput(String input) {
+        String[] parts = input.split(":");
+        if (parts.length < 2) return input;
+        if ("button".equals(parts[0])) return "button:" + friendlyButtonCode(parts[1]);
+        if ("axis".equals(parts[0]) && parts.length >= 3) return "axis:" + friendlyAxisCode(parts[1]) + ":" + parts[2];
+        return input;
+    }
+
+    private String friendlyButtonCode(String code) {
+        Integer n = parseCodeNumber(code);
+        if (n == null) return code;
+        switch (n) {
+            case 1: return "KEY_ESC";
+            case 14: return "KEY_BACKSPACE";
+            case 15: return "KEY_TAB";
+            case 16: return "KEY_Q";
+            case 17: return "KEY_W";
+            case 18: return "KEY_E";
+            case 19: return "KEY_R";
+            case 20: return "KEY_T";
+            case 21: return "KEY_Y";
+            case 22: return "KEY_U";
+            case 23: return "KEY_I";
+            case 24: return "KEY_O";
+            case 25: return "KEY_P";
+            case 28: return "KEY_ENTER";
+            case 29: return "KEY_LEFTCTRL";
+            case 30: return "KEY_A";
+            case 31: return "KEY_S";
+            case 32: return "KEY_D";
+            case 33: return "KEY_F";
+            case 34: return "KEY_G";
+            case 35: return "KEY_H";
+            case 36: return "KEY_J";
+            case 37: return "KEY_K";
+            case 38: return "KEY_L";
+            case 42: return "KEY_LEFTSHIFT";
+            case 44: return "KEY_Z";
+            case 45: return "KEY_X";
+            case 46: return "KEY_C";
+            case 47: return "KEY_V";
+            case 48: return "KEY_B";
+            case 49: return "KEY_N";
+            case 50: return "KEY_M";
+            case 56: return "KEY_LEFTALT";
+            case 57: return "KEY_SPACE";
+            case 272: return "BTN_LEFT";
+            case 273: return "BTN_RIGHT";
+            case 274: return "BTN_MIDDLE";
+            case 275: return "BTN_SIDE";
+            case 276: return "BTN_EXTRA";
+            case 277: return "BTN_FORWARD";
+            case 278: return "BTN_BACK";
+            case 279: return "BTN_TASK";
+            case 304: return "BTN_A";
+            case 305: return "BTN_B";
+            case 306: return "BTN_C";
+            case 307: return "BTN_X";
+            case 308: return "BTN_Y";
+            case 309: return "BTN_Z";
+            case 310: return "BTN_TL";
+            case 311: return "BTN_TR";
+            case 312: return "BTN_TL2";
+            case 313: return "BTN_TR2";
+            case 314: return "BTN_SELECT";
+            case 315: return "BTN_START";
+            case 316: return "BTN_MODE";
+            case 317: return "BTN_THUMBL";
+            case 318: return "BTN_THUMBR";
+            default: return code;
+        }
+    }
+
+    private String friendlyAxisCode(String code) {
+        Integer n = parseCodeNumber(code);
+        if (n == null) return code;
+        switch (n) {
+            case 0: return "ABS_X";
+            case 1: return "ABS_Y";
+            case 2: return "ABS_Z";
+            case 3: return "ABS_RX";
+            case 4: return "ABS_RY";
+            case 5: return "ABS_RZ";
+            case 6: return "ABS_THROTTLE";
+            case 7: return "ABS_RUDDER";
+            case 8: return "ABS_WHEEL";
+            case 9: return "ABS_GAS";
+            case 10: return "ABS_BRAKE";
+            case 16: return "ABS_HAT0X";
+            case 17: return "ABS_HAT0Y";
+            case 18: return "ABS_HAT1X";
+            case 19: return "ABS_HAT1Y";
+            case 20: return "ABS_HAT2X";
+            case 21: return "ABS_HAT2Y";
+            case 22: return "ABS_HAT3X";
+            case 23: return "ABS_HAT3Y";
+            default: return code;
+        }
+    }
+
+    private Integer parseCodeNumber(String code) {
+        try {
+            if (code == null) return null;
+            code = code.trim();
+            if (code.startsWith("0x") || code.startsWith("0X")) return Integer.parseInt(code.substring(2), 16);
+            return Integer.parseInt(code);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private DetectedInput captureDetectedInput(DeviceInfo device, int timeoutSeconds) {

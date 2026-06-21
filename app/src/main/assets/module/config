@@ -1,6 +1,6 @@
 EVENT_NAME="Xbox Wireless Controller"
-OUTPUT_NAME="RG505 D-pad WASD"
-OUTPUT_MOUSE_NAME="RG505 Mapper Mouse"
+OUTPUT_NAME="Handheld Remapper Keyboard"
+OUTPUT_MOUSE_NAME="Handheld Remapper Mouse"
 DEBUG=0
 BLOCK_ORIGINAL_INPUT=1
 MOUSE_AXIS_X="ABS_Z"

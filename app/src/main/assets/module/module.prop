@@ -1,6 +1,6 @@
 id=rg505_dpad_wasd
-name=RG505 Input Mapper
-version=4.4-hid-mouse-reports
-versionCode=44
+name=Handheld Remapper Backend
+version=4.5-branding
+versionCode=45
 author=ChatGPT
-description=Native daemon backend with HID mouse reports and optional source input blocking.
+description=Native daemon backend for handheld controller remapping.

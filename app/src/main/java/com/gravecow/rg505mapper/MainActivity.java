@@ -115,7 +115,7 @@ public class MainActivity extends Activity {
         nameField = null;
         saveButton = null;
         setBase();
-        addHeader("RG505 Input Mapper", "Checking backend status");
+        addHeader("Handheld Remapper", "Checking backend status");
         addStatus("Checking backend...");
         setContentView(scroll);
         new Thread(() -> {
@@ -129,7 +129,7 @@ public class MainActivity extends Activity {
 
     private void showInstallOnly(BackendInfo info) {
         setBase();
-        addHeader("RG505 Input Mapper", "Install the mapper backend before editing presets.");
+        addHeader("Handheld Remapper", "Install the mapper backend before editing presets.");
         MaterialCardView card = surface();
         LinearLayout body = cardBody(card);
         body.addView(bodyText("Backend not installed."));
@@ -142,7 +142,7 @@ public class MainActivity extends Activity {
 
     private void showMain(BackendInfo info) {
         setBase();
-        addHeader("RG505 Input Mapper", "Create, edit, apply, and manage input presets.");
+        addHeader("Handheld Remapper", "Create, edit, apply, and manage input presets.");
 
         if (info.outdated) {
             MaterialCardView update = surface();
@@ -247,19 +247,21 @@ public class MainActivity extends Activity {
         nameField = edit(p.name);
         root.addView(nameField, full());
 
-        root.addView(section("Mouse Stick"));
-        MaterialCardView mouseCard = surface();
-        LinearLayout mouse = cardBody(mouseCard);
-        learnStickButton = button("Learn stick", false, v -> learnStick());
-        mouse.addView(learnStickButton, full());
-        mouse.addView(small("Current: " + p.mouseAxisX + " / " + p.mouseAxisY));
+        root.addView(section("Preset Behavior"));
         blockOriginalField = new CheckBox(this);
         blockOriginalField.setText("Block original controller input");
         blockOriginalField.setTextColor(TEXT);
         blockOriginalField.setTextSize(15);
         blockOriginalField.setChecked(p.blockOriginalInput);
         blockOriginalField.setButtonTintList(android.content.res.ColorStateList.valueOf(PRIMARY));
-        mouse.addView(blockOriginalField, full());
+        root.addView(blockOriginalField, full());
+
+        root.addView(section("Mouse Stick"));
+        MaterialCardView mouseCard = surface();
+        LinearLayout mouse = cardBody(mouseCard);
+        learnStickButton = button("Learn stick", false, v -> learnStick());
+        mouse.addView(learnStickButton, full());
+        mouse.addView(small("Current: " + p.mouseAxisX + " / " + p.mouseAxisY));
 
         LinearLayout advanced = new LinearLayout(this);
         advanced.setOrientation(LinearLayout.VERTICAL);
@@ -834,7 +836,7 @@ public class MainActivity extends Activity {
 
     private boolean isLikelyController(DeviceInfo d) {
         String hay = (d.name + "\n" + d.block).toLowerCase(Locale.US);
-        if (hay.contains("rg505 mapper") || hay.contains("touch") || hay.contains("keyboard")) return false;
+        if (hay.contains("handheld remapper") || hay.contains("rg505 mapper") || hay.contains("touch") || hay.contains("keyboard")) return false;
         return hay.contains("xbox")
                 || hay.contains("gamepad")
                 || hay.contains("controller")
@@ -1311,7 +1313,7 @@ public class MainActivity extends Activity {
 
         String toConfig() {
             StringBuilder sb = new StringBuilder();
-            sb.append("EVENT_NAME=\"").append(sourceName).append("\"\nOUTPUT_NAME=\"RG505 D-pad WASD\"\nOUTPUT_MOUSE_NAME=\"RG505 Mapper Mouse\"\nDEBUG=0\nBLOCK_ORIGINAL_INPUT=").append(blockOriginalInput ? 1 : 0).append("\n");
+            sb.append("EVENT_NAME=\"").append(sourceName).append("\"\nOUTPUT_NAME=\"Handheld Remapper Keyboard\"\nOUTPUT_MOUSE_NAME=\"Handheld Remapper Mouse\"\nDEBUG=0\nBLOCK_ORIGINAL_INPUT=").append(blockOriginalInput ? 1 : 0).append("\n");
             sb.append("MOUSE_AXIS_X=\"").append(mouseAxisX).append("\"\nMOUSE_AXIS_Y=\"").append(mouseAxisY).append("\"\nMOUSE_CENTER_X=").append(centerX).append("\nMOUSE_CENTER_Y=").append(centerY).append("\nMOUSE_MIN_X=").append(mouseMinX).append("\nMOUSE_MAX_X=").append(mouseMaxX).append("\nMOUSE_MIN_Y=").append(mouseMinY).append("\nMOUSE_MAX_Y=").append(mouseMaxY).append("\nMOUSE_DEADZONE=").append(deadzone).append("\nMOUSE_SPEED=").append(speed).append("\nMOUSE_INTERVAL_MS=").append(intervalMs).append("\n");
             for (int i = 0; i < maps.size(); i++) sb.append("MAP_").append(i + 1).append("=\"").append(maps.get(i).input).append(":").append(maps.get(i).target).append("\"\n");
             return sb.toString();

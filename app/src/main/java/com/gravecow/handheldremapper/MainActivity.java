@@ -1,4 +1,4 @@
-package com.gravecow.rg505mapper;
+package com.gravecow.handheldremapper;
 
 import android.app.Activity;
 import android.app.AlertDialog;
@@ -46,7 +46,7 @@ import java.util.Locale;
 import java.util.Map;
 
 public class MainActivity extends Activity {
-    private static final String MODDIR = "/data/adb/modules/rg505_dpad_wasd";
+    private static final String MODDIR = "/data/adb/modules/handheld_remapper";
     private static final String PREFS = "presets";
     private static final String PRESETS_JSON = "presets_json";
     private static final String APPLIED_NAME = "applied_name";
@@ -190,14 +190,32 @@ public class MainActivity extends Activity {
         root.addView(buttonRow(importButton, exportButton));
 
         root.addView(section("Backend"));
-        MaterialButton restart = button("Restart", true, v -> runAndShowAsync("sh " + MODDIR + "/mapctl restart"));
+        MaterialButton restart = button("Restart", true, v -> restartAppliedPresetOrBackend());
         MaterialButton stop = button("Stop", true, v -> runAndShowAsync("sh " + MODDIR + "/mapctl stop"));
         MaterialButton status = button("Status", true, v -> runAndShowAsync("sh " + MODDIR + "/mapctl status"));
         MaterialButton logs = button("Logs", true, v -> runAndShowAsync("sh " + MODDIR + "/mapctl logs 160"));
+        MaterialButton debug = button("Debug", true, v -> showDebugMenu());
         root.addView(buttonRow(restart, stop));
-        root.addView(buttonRow(status, logs));
+        root.addView(buttonRow(status, logs, debug));
 
         addStatus("Ready");
+        setContentView(scroll);
+    }
+
+    private void showDebugMenu() {
+        setBase();
+        addHeader("Debug", "Run these checks after updating the backend and applying a preset.");
+        MaterialButton back = button("Back", true, v -> showGateThenMain());
+        MaterialButton report = button("Report", false, v -> runAndShowAsync("sh " + MODDIR + "/mapctl debug-report"));
+        root.addView(buttonRow(back, report));
+        MaterialButton wheelUp = button("Wheel up", true, v -> runAndShowAsync("sh " + MODDIR + "/mapctl test-wheel up"));
+        MaterialButton wheelDown = button("Wheel down", true, v -> runAndShowAsync("sh " + MODDIR + "/mapctl test-wheel down"));
+        root.addView(buttonRow(wheelUp, wheelDown));
+        MaterialButton status = button("Status", true, v -> runAndShowAsync("sh " + MODDIR + "/mapctl status"));
+        MaterialButton logs = button("Logs", true, v -> runAndShowAsync("sh " + MODDIR + "/mapctl logs 240"));
+        root.addView(buttonRow(status, logs));
+        root.addView(bodyText("If wheel mappings still do not scroll, tap Report, trigger your mapped wheel input once, tap Report again, then copy the output here."));
+        addStatus("");
         setContentView(scroll);
     }
 
@@ -417,8 +435,7 @@ public class MainActivity extends Activity {
         savePresetsSync();
         final String appliedName = editing.name;
         final int appliedVersion = editing.version;
-        String config = editing.toConfig();
-        String cmd = "cat > " + MODDIR + "/config <<'CFG'\n" + config + "CFG\nsh " + MODDIR + "/mapctl restart";
+        String cmd = applyConfigCommand(editing);
         runAndShowAsync(cmd, () -> {
             prefs.edit().putString(APPLIED_NAME, appliedName).putInt(APPLIED_VERSION, appliedVersion).commit();
             showPreset(editing, false, editingIndex);
@@ -901,7 +918,7 @@ public class MainActivity extends Activity {
 
     private boolean isLikelyController(DeviceInfo d) {
         String hay = (d.name + "\n" + d.block).toLowerCase(Locale.US);
-        if (hay.contains("handheld remapper") || hay.contains("rg505 mapper") || hay.contains("touch") || hay.contains("keyboard")) return false;
+        if (hay.contains("handheld remapper") || hay.contains("touch") || hay.contains("keyboard")) return false;
         return hay.contains("xbox")
                 || hay.contains("gamepad")
                 || hay.contains("controller")
@@ -918,7 +935,10 @@ public class MainActivity extends Activity {
             String result;
             try {
                 copyAssetFolder("module", getCacheDir());
-                result = runRoot("mkdir -p " + MODDIR + " && cp -f " + getCacheDir().getAbsolutePath() + "/module/* " + MODDIR + "/ && chmod 755 " + MODDIR + " " + MODDIR + "/*");
+                String install = "mkdir -p " + MODDIR + " && cp -f " + getCacheDir().getAbsolutePath() + "/module/* " + MODDIR + "/ && chmod 755 " + MODDIR + " " + MODDIR + "/*";
+                Preset applied = findAppliedPreset();
+                if (applied != null) install += "\n" + applyConfigCommand(applied);
+                result = runRoot(install);
             } catch (Exception e) {
                 result = "Install failed: " + e;
             }
@@ -928,6 +948,22 @@ public class MainActivity extends Activity {
                 showGateThenMain();
             });
         }).start();
+    }
+
+    private void restartAppliedPresetOrBackend() {
+        Preset applied = findAppliedPreset();
+        runAndShowAsync(applied == null ? "sh " + MODDIR + "/mapctl restart" : applyConfigCommand(applied));
+    }
+
+    private Preset findAppliedPreset() {
+        String applied = prefs.getString(APPLIED_NAME, null);
+        if (applied == null) return null;
+        for (Preset p : presets) if (applied.equals(p.name)) return p;
+        return null;
+    }
+
+    private String applyConfigCommand(Preset p) {
+        return "cat > " + MODDIR + "/config <<'CFG'\n" + p.toConfig() + "CFG\nsh " + MODDIR + "/mapctl restart";
     }
 
     private void runAndShowAsync(String cmd) {
@@ -967,7 +1003,7 @@ public class MainActivity extends Activity {
     private BackendInfo getBackendInfo() {
         BackendInfo bi = new BackendInfo();
         String out = runRootCaptureSilent("test -f " + MODDIR + "/module.prop && cat " + MODDIR + "/module.prop || true");
-        bi.installed = out.contains("id=rg505_dpad_wasd");
+        bi.installed = out.contains("id=handheld_remapper");
         bi.installedCode = parseVersionCode(out);
         bi.assetCode = getAssetVersionCode();
         bi.outdated = bi.installed && bi.assetCode > bi.installedCode;

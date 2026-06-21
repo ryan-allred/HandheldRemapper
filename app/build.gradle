@@ -1,7 +1,7 @@
 plugins { id 'com.android.application' }
 
 android {
-    namespace 'com.gravecow.rg505mapper'
+    namespace 'com.gravecow.handheldremapper'
     compileSdk 35
 
     def ciRunNumber = System.getenv('GITHUB_RUN_NUMBER')
@@ -17,7 +17,7 @@ android {
     }
 
     defaultConfig {
-        applicationId 'com.gravecow.rg505mapper'
+        applicationId 'com.gravecow.handheldremapper'
         minSdk 26
         targetSdk 35
         versionCode generatedVersionCode

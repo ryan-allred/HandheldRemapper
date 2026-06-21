@@ -27,8 +27,8 @@
 #endif
 
 static volatile sig_atomic_t g_stop = 0;
-static const char *PIDFILE = "/data/local/tmp/rg505_mapperd.pid";
-static const char *STOPFILE = "/data/local/tmp/rg505_mapperd.disabled";
+static const char *PIDFILE = "/data/local/tmp/handheld_remapperd.pid";
+static const char *STOPFILE = "/data/local/tmp/handheld_remapperd.disabled";
 
 typedef enum { MAP_AXIS, MAP_BUTTON } MapType;
 typedef enum { TARGET_KEY, TARGET_MOUSE, TARGET_WHEEL } TargetType;
@@ -206,15 +206,16 @@ static void set_target(const Mapping *m, int keyfd, int mousefd, FILE *hid, int 
 }
 
 int main(int argc, char **argv) {
-    const char *cfgpath=argc>1?argv[1]:"/data/adb/modules/rg505_dpad_wasd/config";
+    const char *cfgpath=argc>1?argv[1]:"/data/adb/modules/handheld_remapper/config";
     Config cfg;
     load_config(cfgpath,&cfg);
     FILE *pf=fopen(PIDFILE,"w");
     if(pf){fprintf(pf,"%d\n",getpid()); fclose(pf);}
     signal(SIGTERM,on_signal);
     signal(SIGINT,on_signal);
-    logf2("rg505_mapperd starting native backend");
+    logf2("handheld_remapperd starting native backend");
     logf2("source name=%s mouse axes=%s/%s center=%d,%d range x=%d..%d y=%d..%d dz=%d speed=%d interval=%d block=%d",cfg.event_name,cfg.mouse_axis_x,cfg.mouse_axis_y,cfg.mouse_center_x,cfg.mouse_center_y,cfg.mouse_min_x,cfg.mouse_max_x,cfg.mouse_min_y,cfg.mouse_max_y,cfg.mouse_deadzone,cfg.mouse_speed,cfg.mouse_interval_ms,cfg.block_original_input);
+    for(int i=0;i<cfg.map_count;i++) logf2("map %d raw=%s target_type=%d target_code=%d",i+1,cfg.maps[i].raw,cfg.maps[i].target_type,cfg.maps[i].target_code);
     FILE *hid=start_hid(&cfg);
     if(!hid){logf2("ERROR starting hid"); return 1;}
 
@@ -304,7 +305,7 @@ int main(int argc, char **argv) {
 
 cleanup:
     if(grabbed) ioctl(src, EVIOCGRAB, 0);
-    logf2("rg505_mapperd stopping");
+    logf2("handheld_remapperd stopping");
     if(src>=0) close(src);
     if(keyfd>=0) close(keyfd);
     if(mousefd>=0) close(mousefd);

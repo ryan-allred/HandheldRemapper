@@ -1,6 +1,6 @@
-id=rg505_dpad_wasd
+id=handheld_remapper
 name=Handheld Remapper Backend
-version=4.6-wheel-detents
-versionCode=46
+version=5.2-debug-tools
+versionCode=52
 author=ChatGPT
-description=Native daemon backend with wheel detent output for handheld remapping.
+description=Native daemon backend for Handheld Remapper.

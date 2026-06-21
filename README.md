@@ -62,6 +62,8 @@ Debug APKs are signed with the checked-in development update key at `app/signing
 
 If an older APK was installed with a different debug key, Android may require one uninstall before the first APK signed with this repo key can be installed. After that, updates should install in place.
 
+Version 5 renamed the Android package and Magisk module id from the original device-specific names. Uninstall older builds and remove the old backend module before installing version 5 or newer.
+
 Do not commit `local.properties`; it is machine-specific SDK configuration.
 
 ## Using The App

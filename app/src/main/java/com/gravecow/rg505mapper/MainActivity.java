@@ -63,7 +63,7 @@ public class MainActivity extends Activity {
     private static final String[] TARGETS = new String[]{
             "KEY_W","KEY_A","KEY_S","KEY_D","KEY_Q","KEY_E","KEY_R","KEY_F","KEY_Z","KEY_X","KEY_C","KEY_V","KEY_B",
             "KEY_SPACE","KEY_ENTER","KEY_ESC","KEY_TAB","KEY_LEFTCTRL","KEY_LEFTSHIFT","KEY_LEFTALT",
-            "MOUSE_LEFT","MOUSE_RIGHT","MOUSE_MIDDLE"
+            "MOUSE_LEFT","MOUSE_RIGHT","MOUSE_MIDDLE","MOUSE_WHEEL_UP","MOUSE_WHEEL_DOWN"
     };
 
     private LinearLayout root;

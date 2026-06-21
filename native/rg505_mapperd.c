@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -37,6 +38,7 @@ typedef struct {
     char mouse_axis_y[STR];
     int mouse_center_x, mouse_center_y, mouse_min_x, mouse_max_x, mouse_min_y, mouse_max_y, mouse_deadzone, mouse_speed, mouse_interval_ms;
     int debug;
+    int block_original_input;
     Mapping maps[MAX_MAPS];
     int map_count;
 } Config;
@@ -65,7 +67,7 @@ static int wheel_delta(const char *s) { if(!strcmp(s,"MOUSE_WHEEL_UP")||!strcmp(
 static int abs_code(const char *s) { if(!strcmp(s,"ABS_X")) return ABS_X; if(!strcmp(s,"ABS_Y")) return ABS_Y; if(!strcmp(s,"ABS_Z")) return ABS_Z; if(!strcmp(s,"ABS_RX")) return ABS_RX; if(!strcmp(s,"ABS_RY")) return ABS_RY; if(!strcmp(s,"ABS_RZ")) return ABS_RZ; if(!strcmp(s,"ABS_HAT0X")) return ABS_HAT0X; if(!strcmp(s,"ABS_HAT0Y")) return ABS_HAT0Y; return -1; }
 static int src_key_code(const char *s) { int k=key_code(s); if(k>=0) return k; if(!strcmp(s,"BTN_A")||!strcmp(s,"BTN_SOUTH")) return BTN_A; if(!strcmp(s,"BTN_B")||!strcmp(s,"BTN_EAST")) return BTN_B; if(!strcmp(s,"BTN_X")||!strcmp(s,"BTN_NORTH")) return BTN_X; if(!strcmp(s,"BTN_Y")||!strcmp(s,"BTN_WEST")) return BTN_Y; if(!strcmp(s,"BTN_TL")) return BTN_TL; if(!strcmp(s,"BTN_TR")) return BTN_TR; if(!strcmp(s,"BTN_SELECT")) return BTN_SELECT; if(!strcmp(s,"BTN_START")) return BTN_START; return -1; }
 
-static void cfg_defaults(Config *c) { memset(c,0,sizeof(*c)); strcpy(c->event_name,"Xbox Wireless Controller"); strcpy(c->output_name,"RG505 D-pad WASD"); strcpy(c->output_mouse_name,"RG505 Mapper Mouse"); strcpy(c->mouse_axis_x,"ABS_Z"); strcpy(c->mouse_axis_y,"ABS_RZ"); c->mouse_center_x=0; c->mouse_center_y=0; c->mouse_min_x=-32768; c->mouse_max_x=32767; c->mouse_min_y=-32768; c->mouse_max_y=32767; c->mouse_deadzone=50; c->mouse_speed=8; c->mouse_interval_ms=1; }
+static void cfg_defaults(Config *c) { memset(c,0,sizeof(*c)); strcpy(c->event_name,"Xbox Wireless Controller"); strcpy(c->output_name,"RG505 D-pad WASD"); strcpy(c->output_mouse_name,"RG505 Mapper Mouse"); strcpy(c->mouse_axis_x,"ABS_Z"); strcpy(c->mouse_axis_y,"ABS_RZ"); c->mouse_center_x=0; c->mouse_center_y=0; c->mouse_min_x=-32768; c->mouse_max_x=32767; c->mouse_min_y=-32768; c->mouse_max_y=32767; c->mouse_deadzone=50; c->mouse_speed=8; c->mouse_interval_ms=1; c->block_original_input=1; }
 static void parse_map(Config *c, const char *value) {
     if(c->map_count>=MAX_MAPS) return;
     char buf[256];
@@ -126,6 +128,7 @@ static int load_config(const char *path, Config *c) {
         else if(!strcmp(k,"MOUSE_SPEED")) c->mouse_speed=atoi(v);
         else if(!strcmp(k,"MOUSE_INTERVAL_MS")) c->mouse_interval_ms=atoi(v);
         else if(!strcmp(k,"DEBUG")) c->debug=atoi(v);
+        else if(!strcmp(k,"BLOCK_ORIGINAL_INPUT")) c->block_original_input=atoi(v);
         else if(!strncmp(k,"MAP_",4)) parse_map(c,v);
     }
     fclose(f);
@@ -174,5 +177,111 @@ static void set_target(const Mapping *m, int keyfd, int mousefd, int down) {
     sync_ev(fd);
 }
 
-int main(int argc, char **argv) { const char *cfgpath=argc>1?argv[1]:"/data/adb/modules/rg505_dpad_wasd/config"; Config cfg; load_config(cfgpath,&cfg); FILE *pf=fopen(PIDFILE,"w"); if(pf){fprintf(pf,"%d\n",getpid()); fclose(pf);} signal(SIGTERM,on_signal); signal(SIGINT,on_signal); logf2("rg505_mapperd starting native backend"); logf2("source name=%s mouse axes=%s/%s center=%d,%d range x=%d..%d y=%d..%d dz=%d speed=%d interval=%d",cfg.event_name,cfg.mouse_axis_x,cfg.mouse_axis_y,cfg.mouse_center_x,cfg.mouse_center_y,cfg.mouse_min_x,cfg.mouse_max_x,cfg.mouse_min_y,cfg.mouse_max_y,cfg.mouse_deadzone,cfg.mouse_speed,cfg.mouse_interval_ms); FILE *hid=start_hid(&cfg); if(!hid){logf2("ERROR starting hid"); return 1;} char srcpath[128], keypath[128], mousepath[128]; if(wait_event(cfg.event_name,srcpath,sizeof(srcpath))||wait_event(cfg.output_name,keypath,sizeof(keypath))||wait_event(cfg.output_mouse_name,mousepath,sizeof(mousepath))){logf2("ERROR finding event nodes");return 2;} logf2("events source=%s keyboard=%s mouse=%s",srcpath,keypath,mousepath); int src=open(srcpath,O_RDONLY|O_CLOEXEC); int keyfd=open(keypath,O_WRONLY|O_CLOEXEC); int mousefd=open(mousepath,O_WRONLY|O_CLOEXEC); if(src<0||keyfd<0||mousefd<0){logf2("ERROR open fds: %s",strerror(errno));return 3;} int mx_code=abs_code(cfg.mouse_axis_x), my_code=abs_code(cfg.mouse_axis_y); int mdx_fp=0, mdy_fp=0, accx=0, accy=0; struct pollfd pfd={.fd=src,.events=POLLIN}; while(!g_stop && access(STOPFILE,F_OK)!=0){ int pr=poll(&pfd,1,cfg.mouse_interval_ms); if(pr>0 && (pfd.revents&POLLIN)){ struct input_event ev; while(read(src,&ev,sizeof(ev))==(ssize_t)sizeof(ev)){ if(ev.type==EV_ABS){ for(int i=0;i<cfg.map_count;i++){ Mapping *m=&cfg.maps[i]; if(m->type==MAP_AXIS && m->src_code==ev.code){ int dir=0; if(ev.code==ABS_HAT0X||ev.code==ABS_HAT0Y) dir=ev.value; else { int center = ev.code==mx_code?cfg.mouse_center_x:(ev.code==my_code?cfg.mouse_center_y:0); int diff=ev.value-center; if(diff>cfg.mouse_deadzone)dir=1; else if(diff<-cfg.mouse_deadzone)dir=-1; } int active=(dir==m->dir); if(active!=m->active){ set_target(m,keyfd,mousefd,active); m->active=active; } } } if(ev.code==mx_code){ mdx_fp=mouse_delta_fp(ev.value,cfg.mouse_center_x,cfg.mouse_min_x,cfg.mouse_max_x,cfg.mouse_deadzone,cfg.mouse_speed); if(!mdx_fp) accx=0; } if(ev.code==my_code){ mdy_fp=mouse_delta_fp(ev.value,cfg.mouse_center_y,cfg.mouse_min_y,cfg.mouse_max_y,cfg.mouse_deadzone,cfg.mouse_speed); if(!mdy_fp) accy=0; } } else if(ev.type==EV_KEY){ for(int i=0;i<cfg.map_count;i++){ Mapping *m=&cfg.maps[i]; if(m->type==MAP_BUTTON && m->src_code==ev.code){ int active=ev.value!=0; if(active!=m->active){ set_target(m,keyfd,mousefd,active); m->active=active; } } } } if(ev.type==EV_SYN) break; } } int mdx=mdx_fp?consume_mouse_delta(&accx,mdx_fp):0; int mdy=mdy_fp?consume_mouse_delta(&accy,mdy_fp):0; if(mdx||mdy){ if(mdx) send_ev(mousefd,EV_REL,REL_X,mdx); if(mdy) send_ev(mousefd,EV_REL,REL_Y,mdy); sync_ev(mousefd); } }
- for(int i=0;i<cfg.map_count;i++) if(cfg.maps[i].active) set_target(&cfg.maps[i],keyfd,mousefd,0); logf2("rg505_mapperd stopping"); close(src); close(keyfd); close(mousefd); if(hid) pclose(hid); unlink(PIDFILE); return 0; }
+int main(int argc, char **argv) {
+    const char *cfgpath=argc>1?argv[1]:"/data/adb/modules/rg505_dpad_wasd/config";
+    Config cfg;
+    load_config(cfgpath,&cfg);
+    FILE *pf=fopen(PIDFILE,"w");
+    if(pf){fprintf(pf,"%d\n",getpid()); fclose(pf);}
+    signal(SIGTERM,on_signal);
+    signal(SIGINT,on_signal);
+    logf2("rg505_mapperd starting native backend");
+    logf2("source name=%s mouse axes=%s/%s center=%d,%d range x=%d..%d y=%d..%d dz=%d speed=%d interval=%d block=%d",cfg.event_name,cfg.mouse_axis_x,cfg.mouse_axis_y,cfg.mouse_center_x,cfg.mouse_center_y,cfg.mouse_min_x,cfg.mouse_max_x,cfg.mouse_min_y,cfg.mouse_max_y,cfg.mouse_deadzone,cfg.mouse_speed,cfg.mouse_interval_ms,cfg.block_original_input);
+    FILE *hid=start_hid(&cfg);
+    if(!hid){logf2("ERROR starting hid"); return 1;}
+
+    int rc=0, src=-1, keyfd=-1, mousefd=-1, grabbed=0;
+    char srcpath[128], keypath[128], mousepath[128];
+    if(wait_event(cfg.event_name,srcpath,sizeof(srcpath))||wait_event(cfg.output_name,keypath,sizeof(keypath))||wait_event(cfg.output_mouse_name,mousepath,sizeof(mousepath))){
+        logf2("ERROR finding event nodes");
+        rc=2;
+        goto cleanup;
+    }
+    logf2("events source=%s keyboard=%s mouse=%s",srcpath,keypath,mousepath);
+    src=open(srcpath,O_RDONLY|O_CLOEXEC);
+    keyfd=open(keypath,O_WRONLY|O_CLOEXEC);
+    mousefd=open(mousepath,O_WRONLY|O_CLOEXEC);
+    if(src<0||keyfd<0||mousefd<0){
+        logf2("ERROR open fds: %s",strerror(errno));
+        rc=3;
+        goto cleanup;
+    }
+    if(cfg.block_original_input) {
+        if(ioctl(src, EVIOCGRAB, 1)==0) {
+            grabbed=1;
+            logf2("source input grabbed");
+        } else {
+            logf2("WARN source grab failed: %s",strerror(errno));
+        }
+    }
+
+    int mx_code=abs_code(cfg.mouse_axis_x), my_code=abs_code(cfg.mouse_axis_y);
+    int mdx_fp=0, mdy_fp=0, accx=0, accy=0;
+    struct pollfd pfd={.fd=src,.events=POLLIN};
+    while(!g_stop && access(STOPFILE,F_OK)!=0){
+        int pr=poll(&pfd,1,cfg.mouse_interval_ms);
+        if(pr>0 && (pfd.revents&POLLIN)){
+            struct input_event ev;
+            while(read(src,&ev,sizeof(ev))==(ssize_t)sizeof(ev)){
+                if(ev.type==EV_ABS){
+                    for(int i=0;i<cfg.map_count;i++){
+                        Mapping *m=&cfg.maps[i];
+                        if(m->type==MAP_AXIS && m->src_code==ev.code){
+                            int dir=0;
+                            if(ev.code==ABS_HAT0X||ev.code==ABS_HAT0Y) dir=ev.value;
+                            else {
+                                int center = ev.code==mx_code?cfg.mouse_center_x:(ev.code==my_code?cfg.mouse_center_y:0);
+                                int diff=ev.value-center;
+                                if(diff>cfg.mouse_deadzone)dir=1;
+                                else if(diff<-cfg.mouse_deadzone)dir=-1;
+                            }
+                            int active=(dir==m->dir);
+                            if(active!=m->active){
+                                set_target(m,keyfd,mousefd,active);
+                                m->active=active;
+                            }
+                        }
+                    }
+                    if(ev.code==mx_code){
+                        mdx_fp=mouse_delta_fp(ev.value,cfg.mouse_center_x,cfg.mouse_min_x,cfg.mouse_max_x,cfg.mouse_deadzone,cfg.mouse_speed);
+                        if(!mdx_fp) accx=0;
+                    }
+                    if(ev.code==my_code){
+                        mdy_fp=mouse_delta_fp(ev.value,cfg.mouse_center_y,cfg.mouse_min_y,cfg.mouse_max_y,cfg.mouse_deadzone,cfg.mouse_speed);
+                        if(!mdy_fp) accy=0;
+                    }
+                } else if(ev.type==EV_KEY){
+                    for(int i=0;i<cfg.map_count;i++){
+                        Mapping *m=&cfg.maps[i];
+                        if(m->type==MAP_BUTTON && m->src_code==ev.code){
+                            int active=ev.value!=0;
+                            if(active!=m->active){
+                                set_target(m,keyfd,mousefd,active);
+                                m->active=active;
+                            }
+                        }
+                    }
+                }
+                if(ev.type==EV_SYN) break;
+            }
+        }
+        int mdx=mdx_fp?consume_mouse_delta(&accx,mdx_fp):0;
+        int mdy=mdy_fp?consume_mouse_delta(&accy,mdy_fp):0;
+        if(mdx||mdy){
+            if(mdx) send_ev(mousefd,EV_REL,REL_X,mdx);
+            if(mdy) send_ev(mousefd,EV_REL,REL_Y,mdy);
+            sync_ev(mousefd);
+        }
+    }
+    for(int i=0;i<cfg.map_count;i++) if(cfg.maps[i].active) set_target(&cfg.maps[i],keyfd,mousefd,0);
+
+cleanup:
+    if(grabbed) ioctl(src, EVIOCGRAB, 0);
+    logf2("rg505_mapperd stopping");
+    if(src>=0) close(src);
+    if(keyfd>=0) close(keyfd);
+    if(mousefd>=0) close(mousefd);
+    if(hid) pclose(hid);
+    unlink(PIDFILE);
+    return rc;
+}

@@ -14,6 +14,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
 import android.widget.AutoCompleteTextView;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
@@ -75,6 +76,7 @@ public class MainActivity extends Activity {
     private boolean editingIsNew;
     private int editingIndex = -1;
     private EditText nameField, sourceField, mouseXField, mouseYField, centerXField, centerYField, mouseMinXField, mouseMaxXField, mouseMinYField, mouseMaxYField, deadzoneField, speedField, intervalField;
+    private CheckBox blockOriginalField;
     private LinearLayout mappingsList;
     private MaterialButton learnStickButton, saveButton;
     private final ArrayList<MappingRow> mappingRows = new ArrayList<>();
@@ -251,6 +253,13 @@ public class MainActivity extends Activity {
         learnStickButton = button("Learn stick", false, v -> learnStick());
         mouse.addView(learnStickButton, full());
         mouse.addView(small("Current: " + p.mouseAxisX + " / " + p.mouseAxisY));
+        blockOriginalField = new CheckBox(this);
+        blockOriginalField.setText("Block original controller input");
+        blockOriginalField.setTextColor(TEXT);
+        blockOriginalField.setTextSize(15);
+        blockOriginalField.setChecked(p.blockOriginalInput);
+        blockOriginalField.setButtonTintList(android.content.res.ColorStateList.valueOf(PRIMARY));
+        mouse.addView(blockOriginalField, full());
 
         LinearLayout advanced = new LinearLayout(this);
         advanced.setOrientation(LinearLayout.VERTICAL);
@@ -364,6 +373,7 @@ public class MainActivity extends Activity {
         p.deadzone = num(deadzoneField, 50);
         p.speed = num(speedField, 8);
         p.intervalMs = num(intervalField, 1);
+        p.blockOriginalInput = blockOriginalField == null || blockOriginalField.isChecked();
         p.maps.clear();
         for (MappingRow r : mappingRows) {
             String in = r.inputButton.getText().toString().trim();
@@ -383,6 +393,7 @@ public class MainActivity extends Activity {
                 @Override public void afterTextChanged(Editable s) {}
             });
         }
+        if (blockOriginalField != null) blockOriginalField.setOnCheckedChangeListener((buttonView, isChecked) -> markDirty());
     }
 
     private void markDirty() {
@@ -1284,6 +1295,7 @@ public class MainActivity extends Activity {
 
     private static class Preset {
         String name = "Preset", sourceName = "Xbox Wireless Controller", mouseAxisX = "ABS_Z", mouseAxisY = "ABS_RZ", lastAppliedHash = "";
+        boolean blockOriginalInput = true;
         int version = 0, centerX = 0, centerY = 0, mouseMinX = -32768, mouseMaxX = 32767, mouseMinY = -32768, mouseMaxY = 32767, deadzone = 50, speed = 8, intervalMs = 1;
         ArrayList<MapEntry> maps = new ArrayList<>();
 
@@ -1299,7 +1311,7 @@ public class MainActivity extends Activity {
 
         String toConfig() {
             StringBuilder sb = new StringBuilder();
-            sb.append("EVENT_NAME=\"").append(sourceName).append("\"\nOUTPUT_NAME=\"RG505 D-pad WASD\"\nOUTPUT_MOUSE_NAME=\"RG505 Mapper Mouse\"\nDEBUG=0\n");
+            sb.append("EVENT_NAME=\"").append(sourceName).append("\"\nOUTPUT_NAME=\"RG505 D-pad WASD\"\nOUTPUT_MOUSE_NAME=\"RG505 Mapper Mouse\"\nDEBUG=0\nBLOCK_ORIGINAL_INPUT=").append(blockOriginalInput ? 1 : 0).append("\n");
             sb.append("MOUSE_AXIS_X=\"").append(mouseAxisX).append("\"\nMOUSE_AXIS_Y=\"").append(mouseAxisY).append("\"\nMOUSE_CENTER_X=").append(centerX).append("\nMOUSE_CENTER_Y=").append(centerY).append("\nMOUSE_MIN_X=").append(mouseMinX).append("\nMOUSE_MAX_X=").append(mouseMaxX).append("\nMOUSE_MIN_Y=").append(mouseMinY).append("\nMOUSE_MAX_Y=").append(mouseMaxY).append("\nMOUSE_DEADZONE=").append(deadzone).append("\nMOUSE_SPEED=").append(speed).append("\nMOUSE_INTERVAL_MS=").append(intervalMs).append("\n");
             for (int i = 0; i < maps.size(); i++) sb.append("MAP_").append(i + 1).append("=\"").append(maps.get(i).input).append(":").append(maps.get(i).target).append("\"\n");
             return sb.toString();
@@ -1333,6 +1345,7 @@ public class MainActivity extends Activity {
             o.put("deadzone", deadzone);
             o.put("speed", speed);
             o.put("intervalMs", intervalMs);
+            o.put("blockOriginalInput", blockOriginalInput);
             o.put("lastAppliedHash", lastAppliedHash);
             JSONArray a = new JSONArray();
             for (MapEntry m : maps) a.put(m.toJson());
@@ -1373,6 +1386,7 @@ public class MainActivity extends Activity {
             p.deadzone = o.optInt("deadzone", 50);
             p.speed = o.optInt("speed", 8);
             p.intervalMs = o.optInt("intervalMs", 1);
+            p.blockOriginalInput = o.optBoolean("blockOriginalInput", true);
             p.lastAppliedHash = o.optString("lastAppliedHash", "");
             JSONArray a = o.optJSONArray("maps");
             if (a != null) for (int i = 0; i < a.length(); i++) p.maps.add(MapEntry.fromJson(a.optJSONObject(i)));

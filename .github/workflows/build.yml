@@ -16,12 +16,6 @@ jobs:
       - uses: android-actions/setup-android@v3
       - name: Install Android SDK pieces
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.0.12077973"
-      - name: Build native daemon
-        run: |
-          NDK="$ANDROID_HOME/ndk/27.0.12077973"
-          CC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android23-clang"
-          "$CC" -O2 -Wall -Wextra -fPIE -pie native/handheld_remapperd.c -o app/src/main/assets/module/handheld_remapperd
-          chmod 755 app/src/main/assets/module/handheld_remapperd
       - name: Download Gradle
         run: |
           curl -L https://services.gradle.org/distributions/gradle-8.7-bin.zip -o /tmp/gradle.zip

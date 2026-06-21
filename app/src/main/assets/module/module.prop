@@ -1,6 +1,6 @@
 id=handheld_remapper
 name=Handheld Remapper Backend
-version=5.5-daemon-listener
-versionCode=55
+version=5.6-fast-listener-hid-wheel
+versionCode=56
 author=ChatGPT
 description=Native daemon backend for Handheld Remapper.

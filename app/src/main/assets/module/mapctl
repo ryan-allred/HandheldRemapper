@@ -26,16 +26,22 @@ listen_input() {
   timeout="${1:-12}"
   case "$timeout" in ''|*[!0-9]*) timeout=12 ;; esac
   [ "$timeout" -lt 1 ] && timeout=1
+  p=$(cat "$PIDFILE" 2>/dev/null)
+  if [ -z "$p" ] || ! kill -0 "$p" 2>/dev/null; then
+    echo not-running
+    exit 2
+  fi
   rm -f "$LISTEN_RESULT"
   echo "$$" > "$LISTEN_REQUEST"
   i=0
-  while [ "$i" -lt "$timeout" ]; do
+  limit=$((timeout * 20))
+  while [ "$i" -lt "$limit" ]; do
     if [ -s "$LISTEN_RESULT" ]; then
       cat "$LISTEN_RESULT"
       rm -f "$LISTEN_REQUEST" "$LISTEN_RESULT"
       exit 0
     fi
-    sleep 1
+    sleep 0.05
     i=$((i+1))
   done
   rm -f "$LISTEN_REQUEST"

@@ -564,9 +564,9 @@ public class MainActivity extends Activity {
         row.inputButton.setText("Listening...\npress or move");
         String source = sourceField != null ? sourceField.getText().toString() : "Xbox Wireless Controller";
         new Thread(() -> {
-            boolean backendRunning = isBackendRunning();
-            DetectedInput detected = backendRunning ? detectInputViaDaemon(source, 12) : null;
-            if (detected == null && !backendRunning) detected = detectInput(source, 12);
+            DaemonListenResult daemonResult = detectInputViaDaemon(12);
+            DetectedInput detected = daemonResult.detected;
+            if (detected == null && daemonResult.unavailable) detected = detectInput(source, 12);
             final DetectedInput captured = detected;
             runOnUiThread(() -> {
                 row.inputButton.setClickable(true);
@@ -711,13 +711,15 @@ public class MainActivity extends Activity {
         return captureDetectedInput(device, seconds);
     }
 
-    private DetectedInput detectInputViaDaemon(String sourceName, int seconds) {
-        DeviceInfo device = findDeviceInfo(sourceName);
+    private DaemonListenResult detectInputViaDaemon(int seconds) {
         String out = runRootCaptureSilent("test -x " + MODDIR + "/mapctl && sh " + MODDIR + "/mapctl listen " + seconds);
+        if (out.contains("not-running") || out.contains("not found") || out.contains("No such file")) {
+            return new DaemonListenResult(null, true);
+        }
         String input = extractDetectedInput(out);
-        if (input == null) return null;
+        if (input == null) return new DaemonListenResult(null, false);
         String display = friendlyInput(input);
-        return new DetectedInput(input, display, device == null ? "" : device.name);
+        return new DaemonListenResult(new DetectedInput(input, display, ""), false);
     }
 
     private String extractDetectedInput(String out) {
@@ -1595,6 +1597,15 @@ public class MainActivity extends Activity {
             input = i;
             display = displayText;
             deviceName = d;
+        }
+    }
+
+    private static class DaemonListenResult {
+        DetectedInput detected;
+        boolean unavailable;
+        DaemonListenResult(DetectedInput d, boolean u) {
+            detected = d;
+            unavailable = u;
         }
     }
 

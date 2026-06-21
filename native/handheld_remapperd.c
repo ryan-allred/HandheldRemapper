@@ -22,9 +22,6 @@
 #define MOUSE_FP 256
 #define MOUSE_BASE_FP 24
 #define WHEEL_NOTCH 120
-#ifndef REL_WHEEL_HI_RES
-#define REL_WHEEL_HI_RES 0x0b
-#endif
 
 static volatile sig_atomic_t g_stop = 0;
 static const char *PIDFILE = "/data/local/tmp/handheld_remapperd.pid";
@@ -97,7 +94,8 @@ static void parse_map(Config *c, const char *value) {
     buf[sizeof(buf)-1]=0;
     char *parts[5]={0};
     int n=0;
-    for(char *tok=strtok(buf,":"); tok && n<5; tok=strtok(NULL,":")) parts[n++]=tok;
+    char *saveptr=NULL;
+    for(char *tok=strtok_r(buf,":",&saveptr); tok && n<5; tok=strtok_r(NULL,":",&saveptr)) parts[n++]=tok;
     if(n<3) return;
     Mapping *m=&c->maps[c->map_count];
     memset(m,0,sizeof(*m));
@@ -215,12 +213,6 @@ static void send_hid_mouse(FILE *hid, int buttons, int dx, int dy, int wheel) {
     fprintf(hid,"{\"id\":2,\"command\":\"report\",\"report\":[0x%02x,0x%02x,0x%02x,0x%02x]}\n", buttons&0xff, hid_byte(dx), hid_byte(dy), hid_byte(wheel));
     fflush(hid);
 }
-static void send_evdev_wheel(int mousefd, int delta) {
-    if(mousefd<0 || !delta) return;
-    send_ev(mousefd, EV_REL, REL_WHEEL, delta>0?1:-1);
-    send_ev(mousefd, EV_REL, REL_WHEEL_HI_RES, delta);
-    sync_ev(mousefd);
-}
 static int mouse_delta_fp(int raw, int center, int min, int max, int dz, int speed){
     int diff=raw-center;
     int ad=diff<0?-diff:diff;
@@ -246,11 +238,11 @@ static int consume_mouse_delta(int *accum, int delta_fp) {
     return d;
 }
 static void set_target(const Mapping *m, int keyfd, int mousefd, FILE *hid, int *mouse_buttons, int down) {
+    (void)mousefd;
     if(m->target_type==TARGET_WHEEL) {
         if(down) {
             logf2("wheel target %s delta=%d", m->raw, m->target_code);
             send_hid_mouse(hid, *mouse_buttons, 0, 0, m->target_code);
-            send_evdev_wheel(mousefd, m->target_code);
             usleep(5000);
             send_hid_mouse(hid, *mouse_buttons, 0, 0, 0);
         }

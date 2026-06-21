@@ -47,7 +47,7 @@ For local Android-only builds:
 ./gradlew :app:assembleDebug
 ```
 
-Local builds require an installed Android SDK. The native backend is built by the GitHub workflow.
+Local builds require an installed Android SDK and Android NDK. Gradle builds the native backend before packaging the APK.
 
 ## Using The App
 

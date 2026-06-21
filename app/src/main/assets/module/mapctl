@@ -11,8 +11,8 @@ Commands: status, logs [n], restart, stop, start, preset starbound, set-input <i
 USAGE
 }
 
-load_cfg() { EVENT_NAME="Xbox Wireless Controller"; OUTPUT_NAME="RG505 D-pad WASD"; OUTPUT_MOUSE_NAME="RG505 Mapper Mouse"; DEBUG=0; MOUSE_AXIS_X="ABS_Z"; MOUSE_AXIS_Y="ABS_RZ"; MOUSE_CENTER_X=0; MOUSE_CENTER_Y=0; MOUSE_DEADZONE=200; MOUSE_SPEED=1; MOUSE_INTERVAL_MS=8; [ -f "$CONFIG" ] && . "$CONFIG"; }
-write_maps() { tmp="$1"; { echo "EVENT_NAME=\"$EVENT_NAME\""; echo "OUTPUT_NAME=\"$OUTPUT_NAME\""; echo "OUTPUT_MOUSE_NAME=\"$OUTPUT_MOUSE_NAME\""; echo "DEBUG=$DEBUG"; echo "MOUSE_AXIS_X=\"$MOUSE_AXIS_X\""; echo "MOUSE_AXIS_Y=\"$MOUSE_AXIS_Y\""; echo "MOUSE_CENTER_X=$MOUSE_CENTER_X"; echo "MOUSE_CENTER_Y=$MOUSE_CENTER_Y"; echo "MOUSE_DEADZONE=$MOUSE_DEADZONE"; echo "MOUSE_SPEED=$MOUSE_SPEED"; echo "MOUSE_INTERVAL_MS=$MOUSE_INTERVAL_MS"; i=1; while IFS= read -r m; do [ -n "$m" ] && echo "MAP_$i=\"$m\"" && i=$((i+1)); done < "$tmp"; } > "$CONFIG"; }
+load_cfg() { EVENT_NAME="Xbox Wireless Controller"; OUTPUT_NAME="RG505 D-pad WASD"; OUTPUT_MOUSE_NAME="RG505 Mapper Mouse"; DEBUG=0; MOUSE_AXIS_X="ABS_Z"; MOUSE_AXIS_Y="ABS_RZ"; MOUSE_CENTER_X=0; MOUSE_CENTER_Y=0; MOUSE_MIN_X=-32768; MOUSE_MAX_X=32767; MOUSE_MIN_Y=-32768; MOUSE_MAX_Y=32767; MOUSE_DEADZONE=200; MOUSE_SPEED=1; MOUSE_INTERVAL_MS=8; [ -f "$CONFIG" ] && . "$CONFIG"; }
+write_maps() { tmp="$1"; { echo "EVENT_NAME=\"$EVENT_NAME\""; echo "OUTPUT_NAME=\"$OUTPUT_NAME\""; echo "OUTPUT_MOUSE_NAME=\"$OUTPUT_MOUSE_NAME\""; echo "DEBUG=$DEBUG"; echo "MOUSE_AXIS_X=\"$MOUSE_AXIS_X\""; echo "MOUSE_AXIS_Y=\"$MOUSE_AXIS_Y\""; echo "MOUSE_CENTER_X=$MOUSE_CENTER_X"; echo "MOUSE_CENTER_Y=$MOUSE_CENTER_Y"; echo "MOUSE_MIN_X=$MOUSE_MIN_X"; echo "MOUSE_MAX_X=$MOUSE_MAX_X"; echo "MOUSE_MIN_Y=$MOUSE_MIN_Y"; echo "MOUSE_MAX_Y=$MOUSE_MAX_Y"; echo "MOUSE_DEADZONE=$MOUSE_DEADZONE"; echo "MOUSE_SPEED=$MOUSE_SPEED"; echo "MOUSE_INTERVAL_MS=$MOUSE_INTERVAL_MS"; i=1; while IFS= read -r m; do [ -n "$m" ] && echo "MAP_$i=\"$m\"" && i=$((i+1)); done < "$tmp"; } > "$CONFIG"; }
 current_maps() { tmp="$1"; : > "$tmp"; i=1; while :; do eval m=\${MAP_$i:-}; [ -z "$m" ] && break; echo "$m" >> "$tmp"; i=$((i+1)); done; }
 input_key() { IFS=:; set -- $1; IFS=' '; [ "$1" = axis ] && echo "axis:$2:$3" || { [ "$1" = button ] && echo "button:$2"; }; }
 set_input() { load_cfg; in="$1"; target="$2"; new="$in:$target"; tmp=/data/local/tmp/rg505_mapctl.$$; : > "$tmp"; i=1; while :; do eval m=\${MAP_$i:-}; [ -z "$m" ] && break; [ "$(input_key "$m")" != "$in" ] && echo "$m" >> "$tmp"; i=$((i+1)); done; echo "$new" >> "$tmp"; write_maps "$tmp"; rm -f "$tmp"; echo "mapped $in -> $target"; }
@@ -29,6 +29,10 @@ MOUSE_AXIS_X="ABS_Z"
 MOUSE_AXIS_Y="ABS_RZ"
 MOUSE_CENTER_X=0
 MOUSE_CENTER_Y=0
+MOUSE_MIN_X=-32768
+MOUSE_MAX_X=32767
+MOUSE_MIN_Y=-32768
+MOUSE_MAX_Y=32767
 MOUSE_DEADZONE=200
 MOUSE_SPEED=1
 MOUSE_INTERVAL_MS=8

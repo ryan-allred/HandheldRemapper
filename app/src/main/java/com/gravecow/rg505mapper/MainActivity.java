@@ -6,7 +6,9 @@ import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.os.Bundle;
+import android.text.Editable;
 import android.text.InputType;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -36,7 +38,9 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
 
 public class MainActivity extends Activity {
     private static final String MODDIR = "/data/adb/modules/rg505_dpad_wasd";
@@ -64,9 +68,9 @@ public class MainActivity extends Activity {
     private final ArrayList<Preset> presets = new ArrayList<>();
     private Preset editing;
     private boolean editingIsNew;
-    private EditText nameField, sourceField, mouseXField, mouseYField, centerXField, centerYField, deadzoneField, speedField, intervalField;
+    private EditText nameField, sourceField, mouseXField, mouseYField, centerXField, centerYField, mouseMinXField, mouseMaxXField, mouseMinYField, mouseMaxYField, deadzoneField, speedField, intervalField;
     private LinearLayout mappingsList;
-    private MaterialButton learnStickButton;
+    private MaterialButton learnStickButton, saveButton;
     private final ArrayList<MappingRow> mappingRows = new ArrayList<>();
 
     @Override
@@ -198,9 +202,9 @@ public class MainActivity extends Activity {
         addHeader(isNew ? "New Preset" : "Edit Preset", isNew ? "Save to add it to the preset list." : p.name + " v" + p.version);
 
         MaterialButton back = button("Back", true, v -> showGateThenMain());
-        MaterialButton save = button("Save", false, v -> savePresetOnly());
+        saveButton = button("Save", false, v -> savePresetOnly());
         MaterialButton apply = button("Apply", false, v -> applyPreset());
-        root.addView(buttonRow(back, save, apply));
+        root.addView(buttonRow(back, saveButton, apply));
 
         root.addView(section("Name"));
         nameField = edit(p.name);
@@ -229,6 +233,10 @@ public class MainActivity extends Activity {
         mouseYField = edit(p.mouseAxisY);
         centerXField = edit(String.valueOf(p.centerX));
         centerYField = edit(String.valueOf(p.centerY));
+        mouseMinXField = edit(String.valueOf(p.mouseMinX));
+        mouseMaxXField = edit(String.valueOf(p.mouseMaxX));
+        mouseMinYField = edit(String.valueOf(p.mouseMinY));
+        mouseMaxYField = edit(String.valueOf(p.mouseMaxY));
         deadzoneField = edit(String.valueOf(p.deadzone));
         speedField = edit(String.valueOf(p.speed));
         intervalField = edit(String.valueOf(p.intervalMs));
@@ -237,6 +245,10 @@ public class MainActivity extends Activity {
         advanced.addView(fieldRow("Y axis", mouseYField));
         advanced.addView(fieldRow("Center X", centerXField));
         advanced.addView(fieldRow("Center Y", centerYField));
+        advanced.addView(fieldRow("Min X", mouseMinXField));
+        advanced.addView(fieldRow("Max X", mouseMaxXField));
+        advanced.addView(fieldRow("Min Y", mouseMinYField));
+        advanced.addView(fieldRow("Max Y", mouseMaxYField));
         advanced.addView(fieldRow("Deadzone", deadzoneField));
         advanced.addView(fieldRow("Speed", speedField));
         advanced.addView(fieldRow("Interval", intervalField));
@@ -253,7 +265,9 @@ public class MainActivity extends Activity {
         for (MapEntry m : p.maps) addMappingRow(m.input, m.target);
         if (p.maps.isEmpty()) mappingsList.addView(small("No mappings yet."));
 
-        addStatus(isNew ? "Preset is not saved yet." : "Ready");
+        addStatus(isNew ? "Preset is not saved yet." : "");
+        attachChangeTracking();
+        updateSaveButton(isNew);
         setContentView(scroll);
     }
 
@@ -265,13 +279,14 @@ public class MainActivity extends Activity {
             editingIsNew = false;
         }
         savePresets();
-        output.setText("Saved " + editing.name);
+        updateSaveButton(false);
+        setStatus("Saved " + editing.name);
     }
 
     private void applyPreset() {
         if (editing == null) return;
         if (editingIsNew) {
-            output.setText("Save this preset before applying it.");
+            setStatus("Save this preset before applying it.");
             return;
         }
         collectPreset(editing);
@@ -283,7 +298,11 @@ public class MainActivity extends Activity {
         savePresets();
         String config = editing.toConfig();
         String cmd = "cat > " + MODDIR + "/config <<'CFG'\n" + config + "CFG\nsh " + MODDIR + "/mapctl restart";
-        runAndShowAsync(cmd, () -> prefs.edit().putString(APPLIED_NAME, editing.name).putInt(APPLIED_VERSION, editing.version).apply());
+        runAndShowAsync(cmd, () -> {
+            prefs.edit().putString(APPLIED_NAME, editing.name).putInt(APPLIED_VERSION, editing.version).apply();
+            showPreset(editing, false);
+            setStatus("Applied " + editing.name + " v" + editing.version);
+        });
     }
 
     private void collectPreset(Preset p) {
@@ -293,6 +312,10 @@ public class MainActivity extends Activity {
         p.mouseAxisY = str(mouseYField, "ABS_RZ");
         p.centerX = num(centerXField, 0);
         p.centerY = num(centerYField, 0);
+        p.mouseMinX = num(mouseMinXField, -32768);
+        p.mouseMaxX = num(mouseMaxXField, 32767);
+        p.mouseMinY = num(mouseMinYField, -32768);
+        p.mouseMaxY = num(mouseMaxYField, 32767);
         p.deadzone = num(deadzoneField, 200);
         p.speed = num(speedField, 1);
         p.intervalMs = num(intervalField, 8);
@@ -304,6 +327,28 @@ public class MainActivity extends Activity {
                 p.maps.add(new MapEntry(in, target));
             }
         }
+    }
+
+    private void attachChangeTracking() {
+        EditText[] fields = new EditText[]{nameField, sourceField, mouseXField, mouseYField, centerXField, centerYField, mouseMinXField, mouseMaxXField, mouseMinYField, mouseMaxYField, deadzoneField, speedField, intervalField};
+        for (EditText field : fields) {
+            field.addTextChangedListener(new TextWatcher() {
+                @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+                @Override public void onTextChanged(CharSequence s, int start, int before, int count) { markDirty(); }
+                @Override public void afterTextChanged(Editable s) {}
+            });
+        }
+    }
+
+    private void markDirty() {
+        updateSaveButton(true);
+    }
+
+    private void updateSaveButton(boolean dirty) {
+        if (saveButton == null) return;
+        saveButton.setText(dirty ? "Save" : "Saved");
+        saveButton.setClickable(dirty);
+        saveButton.setEnabled(dirty);
     }
 
     private void addMappingRow(String input, String target) {
@@ -330,6 +375,11 @@ public class MainActivity extends Activity {
         targetField.setHintTextColor(MUTED);
         targetField.setInputType(InputType.TYPE_CLASS_TEXT);
         targetField.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_dropdown_item_1line, TARGETS));
+        targetField.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) { markDirty(); }
+            @Override public void afterTextChanged(Editable s) {}
+        });
 
         MaterialButton remove = button("X", true, null);
         MappingRow mr = new MappingRow(card, listen, targetField);
@@ -341,6 +391,7 @@ public class MainActivity extends Activity {
             mappingsList.removeView(card);
             mappingRows.remove(mr);
             if (mappingRows.isEmpty()) mappingsList.addView(small("No mappings yet."));
+            markDirty();
         });
 
         row.addView(listen, new LinearLayout.LayoutParams(0, dp(50), 5));
@@ -349,6 +400,7 @@ public class MainActivity extends Activity {
         row.addView(targetField, targetLp);
         row.addView(remove, new LinearLayout.LayoutParams(dp(46), dp(46)));
         mappingsList.addView(card);
+        markDirty();
     }
 
     private void listenForInput(MappingRow row) {
@@ -361,11 +413,12 @@ public class MainActivity extends Activity {
                 row.inputButton.setClickable(true);
                 if (detected == null) {
                     row.inputButton.setText("Timed out\nTap to retry");
-                    output.setText("No input detected.");
+                    setStatus("No input detected.");
                 } else {
                     row.inputButton.setText(detected.input);
                     if (sourceField != null && detected.deviceName.length() > 0) sourceField.setText(detected.deviceName);
-                    output.setText("Detected " + detected.input);
+                    markDirty();
+                    setStatus("Detected " + detected.input);
                 }
             });
         }).start();
@@ -373,7 +426,7 @@ public class MainActivity extends Activity {
 
     private void learnStick() {
         setLearnText("Center stick...");
-        output.setText("Learning stick axes...");
+        setStatus("Learning stick axes...");
         String source = sourceField != null ? sourceField.getText().toString() : "Xbox Wireless Controller";
         if (learnStickButton != null) learnStickButton.setClickable(false);
         new Thread(() -> {
@@ -383,54 +436,66 @@ public class MainActivity extends Activity {
                     runOnUiThread(() -> {
                         setLearnText("No controller found - Try again");
                         if (learnStickButton != null) learnStickButton.setClickable(true);
-                        output.setText("No input device matched the source name.");
+                        setStatus("No input device matched the source name.");
                     });
                     return;
                 }
+                final String initialDeviceName = device.name;
                 runOnUiThread(() -> {
-                    if (sourceField != null) sourceField.setText(device.name);
+                    if (sourceField != null) sourceField.setText(initialDeviceName);
                     setLearnText("Center stick...");
                 });
-                sleepMs(1200);
+                sleepMs(1500);
+                DeviceInfo refreshed = findDeviceInfo(device.name);
+                if (refreshed != null) device = refreshed;
+                final DeviceInfo learnedDevice = device;
 
-                AxisSample left = promptAndSample(device, "Move LEFT");
-                AxisSample right = promptAndSample(device, "Move RIGHT");
-                AxisSample up = promptAndSample(device, "Move UP");
-                AxisSample down = promptAndSample(device, "Move DOWN");
+                AxisSample left = promptAndSample(learnedDevice, "Move LEFT to the edge", null, 0, null);
+                AxisSample right = left == null ? null : promptAndSample(learnedDevice, "Move RIGHT to the edge", left.axis, -left.sign, null);
+                AxisSample up = promptAndSample(learnedDevice, "Move UP to the edge", null, 0, left == null ? null : left.axis);
+                AxisSample down = up == null ? null : promptAndSample(learnedDevice, "Move DOWN to the edge", up.axis, -up.sign, null);
 
                 runOnUiThread(() -> {
-                    if (left == null || right == null || up == null || down == null) {
+                    if (left == null || right == null || up == null || down == null || !validOppositePair(left, right) || !validOppositePair(up, down)) {
                         setLearnText("Incomplete - Tap to retry");
                         if (learnStickButton != null) learnStickButton.setClickable(true);
-                        output.setText("Could not detect all stick directions.");
+                        setStatus("Could not detect stable opposite stick directions.");
                         return;
                     }
-                    String xAxis = sameAxis(left, right) ? left.axis : right.axis;
-                    String yAxis = sameAxis(up, down) ? up.axis : down.axis;
+                    AxisCalibration xCal = calibrateAxis(left, right);
+                    AxisCalibration yCal = calibrateAxis(up, down);
+                    String xAxis = xCal.axis;
+                    String yAxis = yCal.axis;
                     mouseXField.setText(xAxis);
                     mouseYField.setText(yAxis);
-                    centerXField.setText(centerFor(left.value, right.value));
-                    centerYField.setText(centerFor(up.value, down.value));
-                    if (deadzoneField.getText().toString().trim().isEmpty()) deadzoneField.setText("200");
+                    centerXField.setText(String.valueOf(xCal.center));
+                    centerYField.setText(String.valueOf(yCal.center));
+                    mouseMinXField.setText(String.valueOf(xCal.min));
+                    mouseMaxXField.setText(String.valueOf(xCal.max));
+                    mouseMinYField.setText(String.valueOf(yCal.min));
+                    mouseMaxYField.setText(String.valueOf(yCal.max));
+                    String dz = deadzoneField.getText().toString().trim();
+                    if (dz.isEmpty() || "200".equals(dz)) deadzoneField.setText(String.valueOf(defaultDeadzone(xCal.min, xCal.max, yCal.min, yCal.max)));
                     if (speedField.getText().toString().trim().isEmpty()) speedField.setText("1");
                     if (intervalField.getText().toString().trim().isEmpty()) intervalField.setText("8");
                     setLearnText("Learned " + xAxis + " / " + yAxis + "\nTap to relearn");
                     if (learnStickButton != null) learnStickButton.setClickable(true);
-                    output.setText("Learned stick axes from " + device.name);
+                    markDirty();
+                    setStatus("Learned stick axes from " + learnedDevice.name);
                 });
             } catch (Exception e) {
                 runOnUiThread(() -> {
                     setLearnText("Learn failed - Tap to retry");
                     if (learnStickButton != null) learnStickButton.setClickable(true);
-                    output.setText("Learn failed: " + e);
+                    setStatus("Learn failed: " + e);
                 });
             }
         }).start();
     }
 
-    private AxisSample promptAndSample(DeviceInfo device, String prompt) {
+    private AxisSample promptAndSample(DeviceInfo device, String prompt, String requiredAxis, int requiredSign, String ignoredAxis) {
         runOnUiThread(() -> setLearnText(prompt));
-        AxisSample sample = sampleAxis(device);
+        AxisSample sample = sampleAxis(device, requiredAxis, requiredSign, ignoredAxis);
         runOnUiThread(() -> setLearnText(sample == null ? prompt + "\nnot detected" : prompt + "\n" + sample.axis + " = " + sample.value));
         sleepMs(350);
         return sample;
@@ -440,8 +505,8 @@ public class MainActivity extends Activity {
         if (learnStickButton != null) learnStickButton.setText(text);
     }
 
-    private AxisSample sampleAxis(DeviceInfo device) {
-        return captureAxisSample(device, 8);
+    private AxisSample sampleAxis(DeviceInfo device, String requiredAxis, int requiredSign, String ignoredAxis) {
+        return captureAxisSample(device, 8, requiredAxis, requiredSign, ignoredAxis);
     }
 
     private String centerFor(int a, int b) {
@@ -453,6 +518,34 @@ public class MainActivity extends Activity {
 
     private boolean sameAxis(AxisSample a, AxisSample b) {
         return a != null && b != null && a.axis.equals(b.axis);
+    }
+
+    private boolean validOppositePair(AxisSample a, AxisSample b) {
+        return sameAxis(a, b) && a.sign != 0 && b.sign != 0 && a.sign == -b.sign;
+    }
+
+    private int defaultDeadzone(int minX, int maxX, int minY, int maxY) {
+        int x = Math.max(1, maxX - minX);
+        int y = Math.max(1, maxY - minY);
+        return Math.max(4, Math.min(x, y) / 12);
+    }
+
+    private AxisCalibration calibrateAxis(AxisSample a, AxisSample b) {
+        if (a.hasRange && b.hasRange && a.axis.equals(b.axis)) {
+            return new AxisCalibration(a.axis, a.center, a.min, a.max);
+        }
+        int min = Math.min(a.value, b.value);
+        int max = Math.max(a.value, b.value);
+        int center = (a.center == b.center) ? a.center : Integer.parseInt(centerFor(a.value, b.value));
+        int low = Math.max(1, center - min);
+        int high = Math.max(1, max - center);
+        int greater = Math.max(low, high);
+        int smaller = Math.min(low, high);
+        if (smaller >= greater * 3 / 4) {
+            min = center - greater;
+            max = center + greater;
+        }
+        return new AxisCalibration(a.axis, center, min, max);
     }
 
     private DetectedInput detectInput(String sourceName, int seconds) {
@@ -486,24 +579,58 @@ public class MainActivity extends Activity {
         return null;
     }
 
-    private AxisSample captureAxisSample(DeviceInfo device, int timeoutSeconds) {
+    private AxisSample captureAxisSample(DeviceInfo device, int timeoutSeconds, String requiredAxis, int requiredSign, String ignoredAxis) {
         Process p = null;
         try {
+            Map<String, AxisInfo> axes = parseAxisInfo(device);
             p = new ProcessBuilder("su", "-c", "getevent -l " + device.path).redirectErrorStream(true).start();
-            destroyAfterTimeout(p, timeoutSeconds);
             BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
+            long deadline = System.currentTimeMillis() + timeoutSeconds * 1000L;
+            long lastImproved = 0;
+            AxisSample best = null;
             String line;
-            while ((line = reader.readLine()) != null) {
+            while (System.currentTimeMillis() < deadline) {
+                if (!reader.ready()) {
+                    if (best != null && best.normalized >= 0.82f && System.currentTimeMillis() - lastImproved >= 650) return best;
+                    sleepMs(40);
+                    continue;
+                }
+                line = reader.readLine();
+                if (line == null) break;
                 EventLine event = parseEventLine(line);
-                if (event != null && "EV_ABS".equals(event.type)) {
-                    return new AxisSample(event.code, event.value);
+                if (event == null || !"EV_ABS".equals(event.type)) continue;
+                if (ignoredAxis != null && ignoredAxis.equals(event.code)) continue;
+                if (requiredAxis != null && !requiredAxis.equals(event.code)) continue;
+
+                AxisInfo info = axes.get(event.code);
+                if (info == null) info = new AxisInfo(event.code, event.value, Math.min(0, event.value), Math.max(0, event.value), 0, false);
+                AxisSample sample = sampleFromEvent(event, info);
+                if (sample.sign == 0) continue;
+                if (requiredSign != 0 && sample.sign != requiredSign) continue;
+                if (sample.normalized < 0.22f) continue;
+
+                if (best == null || sample.normalized > best.normalized || (sample.axis.equals(best.axis) && sample.sign == best.sign && Math.abs(sample.value - info.center) > Math.abs(best.value - info.center))) {
+                    best = sample;
+                    lastImproved = System.currentTimeMillis();
                 }
             }
+            return best != null && best.normalized >= 0.82f ? best : null;
         } catch (Exception ignored) {
         } finally {
             if (p != null) p.destroy();
         }
         return null;
+    }
+
+    private AxisSample sampleFromEvent(EventLine event, AxisInfo info) {
+        int diff = event.value - info.center;
+        int sign = diff > 0 ? 1 : (diff < 0 ? -1 : 0);
+        int extent = sign > 0 ? info.max - info.center : info.center - info.min;
+        if (extent <= 0) extent = Math.max(1, info.max - info.min);
+        float normalized = Math.min(1f, Math.abs(diff) / (float) extent);
+        int value = event.value;
+        if (normalized >= 0.82f) value = sign > 0 ? info.max : info.min;
+        return new AxisSample(event.code, value, sign, normalized, info.center, info.min, info.max, info.hasRange);
     }
 
     private void destroyAfterTimeout(Process process, int timeoutSeconds) {
@@ -514,6 +641,47 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) {
             }
         }).start();
+    }
+
+    private Map<String, AxisInfo> parseAxisInfo(DeviceInfo device) {
+        HashMap<String, AxisInfo> axes = new HashMap<>();
+        for (String rawLine : device.block.split("\\n")) {
+            String line = rawLine.trim();
+            if (!line.contains("ABS_")) continue;
+            String axis = null;
+            String[] parts = line.replace(':', ' ').split("\\s+");
+            for (String part : parts) {
+                if (part.startsWith("ABS_")) {
+                    axis = part;
+                    break;
+                }
+            }
+            if (axis == null) continue;
+            Integer min = parseLabeledInt(line, "min");
+            Integer max = parseLabeledInt(line, "max");
+            Integer value = parseLabeledInt(line, "value");
+            Integer flat = parseLabeledInt(line, "flat");
+            if (value == null && min != null && max != null) value = (min + max) / 2;
+            if (min == null || max == null || value == null) continue;
+            axes.put(axis, new AxisInfo(axis, value, min, max, flat == null ? 0 : flat, true));
+        }
+        return axes;
+    }
+
+    private Integer parseLabeledInt(String line, String label) {
+        int idx = line.indexOf(label);
+        if (idx < 0) return null;
+        idx += label.length();
+        while (idx < line.length() && (line.charAt(idx) == ' ' || line.charAt(idx) == '=')) idx++;
+        int start = idx;
+        if (idx < line.length() && line.charAt(idx) == '-') idx++;
+        while (idx < line.length() && Character.isDigit(line.charAt(idx))) idx++;
+        if (idx == start || (idx == start + 1 && line.charAt(start) == '-')) return null;
+        try {
+            return Integer.parseInt(line.substring(start, idx));
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     private String axisDirection(String code, int value) {
@@ -618,7 +786,7 @@ public class MainActivity extends Activity {
     }
 
     private void installBackendThenMain() {
-        output.setText("Installing...");
+        setStatus("Installing...");
         new Thread(() -> {
             String result;
             try {
@@ -629,7 +797,7 @@ public class MainActivity extends Activity {
             }
             String finalResult = result;
             runOnUiThread(() -> {
-                output.setText(finalResult);
+                setStatus(finalResult);
                 showGateThenMain();
             });
         }).start();
@@ -640,11 +808,11 @@ public class MainActivity extends Activity {
     }
 
     private void runAndShowAsync(String cmd, Runnable after) {
-        output.setText("Running...");
+        setStatus("Running...");
         new Thread(() -> {
             String r = runRootCaptureSilent(cmd);
             runOnUiThread(() -> {
-                output.setText(r);
+                setStatus(r);
                 if (after != null) after.run();
             });
         }).start();
@@ -748,6 +916,13 @@ public class MainActivity extends Activity {
         output.setTextIsSelectable(true);
         output.setPadding(0, dp(14), 0, 0);
         root.addView(output, full());
+        setStatus(text);
+    }
+
+    private void setStatus(String text) {
+        if (output == null) return;
+        output.setText(text);
+        output.setVisibility(text == null || text.length() == 0 ? View.GONE : View.VISIBLE);
     }
 
     private LinearLayout splitHeader(String title) {
@@ -992,10 +1167,43 @@ public class MainActivity extends Activity {
 
     private static class AxisSample {
         String axis;
-        int value;
-        AxisSample(String a, int v) {
+        int value, sign, center, min, max;
+        float normalized;
+        boolean hasRange;
+        AxisSample(String a, int v, int s, float n, int c, int mn, int mx, boolean h) {
             axis = a;
             value = v;
+            sign = s;
+            normalized = n;
+            center = c;
+            min = mn;
+            max = mx;
+            hasRange = h;
+        }
+    }
+
+    private static class AxisInfo {
+        String axis;
+        int center, min, max, flat;
+        boolean hasRange;
+        AxisInfo(String a, int c, int n, int x, int f, boolean h) {
+            axis = a;
+            center = c;
+            min = n;
+            max = x;
+            flat = f;
+            hasRange = h;
+        }
+    }
+
+    private static class AxisCalibration {
+        String axis;
+        int center, min, max;
+        AxisCalibration(String a, int c, int n, int x) {
+            axis = a;
+            center = c;
+            min = n;
+            max = x;
         }
     }
 
@@ -1018,7 +1226,7 @@ public class MainActivity extends Activity {
 
     private static class Preset {
         String name = "Preset", sourceName = "Xbox Wireless Controller", mouseAxisX = "ABS_Z", mouseAxisY = "ABS_RZ", lastAppliedHash = "";
-        int version = 0, centerX = 0, centerY = 0, deadzone = 200, speed = 1, intervalMs = 8;
+        int version = 0, centerX = 0, centerY = 0, mouseMinX = -32768, mouseMaxX = 32767, mouseMinY = -32768, mouseMaxY = 32767, deadzone = 200, speed = 1, intervalMs = 8;
         ArrayList<MapEntry> maps = new ArrayList<>();
 
         static Preset create(String name) {
@@ -1034,7 +1242,7 @@ public class MainActivity extends Activity {
         String toConfig() {
             StringBuilder sb = new StringBuilder();
             sb.append("EVENT_NAME=\"").append(sourceName).append("\"\nOUTPUT_NAME=\"RG505 D-pad WASD\"\nOUTPUT_MOUSE_NAME=\"RG505 Mapper Mouse\"\nDEBUG=0\n");
-            sb.append("MOUSE_AXIS_X=\"").append(mouseAxisX).append("\"\nMOUSE_AXIS_Y=\"").append(mouseAxisY).append("\"\nMOUSE_CENTER_X=").append(centerX).append("\nMOUSE_CENTER_Y=").append(centerY).append("\nMOUSE_DEADZONE=").append(deadzone).append("\nMOUSE_SPEED=").append(speed).append("\nMOUSE_INTERVAL_MS=").append(intervalMs).append("\n");
+            sb.append("MOUSE_AXIS_X=\"").append(mouseAxisX).append("\"\nMOUSE_AXIS_Y=\"").append(mouseAxisY).append("\"\nMOUSE_CENTER_X=").append(centerX).append("\nMOUSE_CENTER_Y=").append(centerY).append("\nMOUSE_MIN_X=").append(mouseMinX).append("\nMOUSE_MAX_X=").append(mouseMaxX).append("\nMOUSE_MIN_Y=").append(mouseMinY).append("\nMOUSE_MAX_Y=").append(mouseMaxY).append("\nMOUSE_DEADZONE=").append(deadzone).append("\nMOUSE_SPEED=").append(speed).append("\nMOUSE_INTERVAL_MS=").append(intervalMs).append("\n");
             for (int i = 0; i < maps.size(); i++) sb.append("MAP_").append(i + 1).append("=\"").append(maps.get(i).input).append(":").append(maps.get(i).target).append("\"\n");
             return sb.toString();
         }
@@ -1060,6 +1268,10 @@ public class MainActivity extends Activity {
             o.put("mouseAxisY", mouseAxisY);
             o.put("centerX", centerX);
             o.put("centerY", centerY);
+            o.put("mouseMinX", mouseMinX);
+            o.put("mouseMaxX", mouseMaxX);
+            o.put("mouseMinY", mouseMinY);
+            o.put("mouseMaxY", mouseMaxY);
             o.put("deadzone", deadzone);
             o.put("speed", speed);
             o.put("intervalMs", intervalMs);
@@ -1079,6 +1291,10 @@ public class MainActivity extends Activity {
             p.mouseAxisY = o.optString("mouseAxisY", "ABS_RZ");
             p.centerX = o.optInt("centerX", 0);
             p.centerY = o.optInt("centerY", 0);
+            p.mouseMinX = o.optInt("mouseMinX", -32768);
+            p.mouseMaxX = o.optInt("mouseMaxX", 32767);
+            p.mouseMinY = o.optInt("mouseMinY", -32768);
+            p.mouseMaxY = o.optInt("mouseMaxY", 32767);
             p.deadzone = o.optInt("deadzone", 200);
             p.speed = o.optInt("speed", 1);
             p.intervalMs = o.optInt("intervalMs", 8);

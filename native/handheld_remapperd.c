@@ -51,9 +51,25 @@ static void on_signal(int sig) { (void)sig; g_stop = 1; }
 static void logf2(const char *fmt, ...) { va_list ap; va_start(ap, fmt); vfprintf(stdout, fmt, ap); fprintf(stdout, "\n"); fflush(stdout); va_end(ap); }
 static void trim(char *s) { size_t n=strlen(s); while(n && (s[n-1]=='\n'||s[n-1]=='\r'||s[n-1]==' '||s[n-1]=='\t')) s[--n]=0; char *p=s; while(*p==' '||*p=='\t') p++; if(p!=s) memmove(s,p,strlen(p)+1); }
 static void unquote(char *s) { trim(s); size_t n=strlen(s); if(n>=2 && ((s[0]=='"'&&s[n-1]=='"')||(s[0]=='\''&&s[n-1]=='\''))) { memmove(s,s+1,n-2); s[n-2]=0; } }
+static int parse_code_number(const char *s) {
+    if(!s||!*s) return -1;
+    char *end=NULL;
+    int base=10;
+    if(strlen(s)>2&&s[0]=='0'&&(s[1]=='x'||s[1]=='X')) base=16;
+    long v=strtol(s,&end,base);
+    if(end&&*end==0&&v>=0&&v<=0xffff) return (int)v;
+    return -1;
+}
+static int parse_prefixed_code(const char *s, const char *prefix) {
+    size_t n=strlen(prefix);
+    if(strncmp(s,prefix,n)) return -1;
+    return parse_code_number(s+n);
+}
 
 static int key_code(const char *s) {
     if(!s) return -1;
+    int pref=parse_prefixed_code(s,"KEY_");
+    if(pref>=0) return pref;
     struct { const char *n; int c; } t[] = {
         {"KEY_ESC",1},{"ESC",1},{"KEY_1",2},{"KEY_2",3},{"KEY_3",4},{"KEY_4",5},{"KEY_5",6},{"KEY_6",7},{"KEY_7",8},{"KEY_8",9},{"KEY_9",10},{"KEY_0",11},
         {"KEY_Q",16},{"Q",16},{"KEY_W",17},{"W",17},{"KEY_E",18},{"E",18},{"KEY_R",19},{"R",19},{"KEY_T",20},{"T",20},{"KEY_Y",21},{"Y",21},{"KEY_U",22},{"U",22},{"KEY_I",23},{"I",23},{"KEY_O",24},{"O",24},{"KEY_P",25},{"P",25},
@@ -62,14 +78,14 @@ static int key_code(const char *s) {
         {"KEY_SPACE",57},{"SPACE",57},{"KEY_ENTER",28},{"ENTER",28},{"KEY_TAB",15},{"TAB",15},{"KEY_LEFTCTRL",29},{"CTRL",29},{"KEY_LEFTSHIFT",42},{"SHIFT",42},{"KEY_LEFTALT",56},{"ALT",56},{"KEY_BACKSPACE",14},{"BACKSPACE",14}
     };
     for(size_t i=0;i<sizeof(t)/sizeof(t[0]);i++) if(!strcmp(s,t[i].n)) return t[i].c;
-    if(!strncmp(s,"KEY_",4)) { const char *n=s+4; int ok=1; for(const char *p=n; *p; p++) if(*p<'0'||*p>'9') ok=0; if(ok && *n) return atoi(n); return -1; }
-    if(s[0]>='0'&&s[0]<='9') return atoi(s);
+    int n=parse_code_number(s);
+    if(n>=0) return n;
     return -1;
 }
-static int mouse_code(const char *s) { if(!strcmp(s,"MOUSE_LEFT")||!strcmp(s,"BTN_LEFT")) return BTN_LEFT; if(!strcmp(s,"MOUSE_RIGHT")||!strcmp(s,"BTN_RIGHT")) return BTN_RIGHT; if(!strcmp(s,"MOUSE_MIDDLE")||!strcmp(s,"BTN_MIDDLE")) return BTN_MIDDLE; return -1; }
+static int mouse_code(const char *s) { int m=parse_prefixed_code(s,"MOUSE_"); if(m>=1&&m<=8) return BTN_MOUSE+m-1; if(m>=0) return m; int b=parse_prefixed_code(s,"BTN_"); if(b>=0) return b; if(!strcmp(s,"MOUSE_LEFT")||!strcmp(s,"BTN_LEFT")) return BTN_LEFT; if(!strcmp(s,"MOUSE_RIGHT")||!strcmp(s,"BTN_RIGHT")) return BTN_RIGHT; if(!strcmp(s,"MOUSE_MIDDLE")||!strcmp(s,"BTN_MIDDLE")) return BTN_MIDDLE; if(!strcmp(s,"BTN_SIDE")) return BTN_SIDE; if(!strcmp(s,"BTN_EXTRA")) return BTN_EXTRA; if(!strcmp(s,"BTN_FORWARD")) return BTN_FORWARD; if(!strcmp(s,"BTN_BACK")) return BTN_BACK; if(!strcmp(s,"BTN_TASK")) return BTN_TASK; return -1; }
 static int wheel_delta(const char *s) { if(!strcmp(s,"MOUSE_WHEEL_UP")||!strcmp(s,"WHEEL_UP")) return WHEEL_NOTCH; if(!strcmp(s,"MOUSE_WHEEL_DOWN")||!strcmp(s,"WHEEL_DOWN")) return -WHEEL_NOTCH; return 0; }
-static int abs_code(const char *s) { if(!strcmp(s,"ABS_X")) return ABS_X; if(!strcmp(s,"ABS_Y")) return ABS_Y; if(!strcmp(s,"ABS_Z")) return ABS_Z; if(!strcmp(s,"ABS_RX")) return ABS_RX; if(!strcmp(s,"ABS_RY")) return ABS_RY; if(!strcmp(s,"ABS_RZ")) return ABS_RZ; if(!strcmp(s,"ABS_HAT0X")) return ABS_HAT0X; if(!strcmp(s,"ABS_HAT0Y")) return ABS_HAT0Y; return -1; }
-static int src_key_code(const char *s) { int k=key_code(s); if(k>=0) return k; if(!strcmp(s,"BTN_A")||!strcmp(s,"BTN_SOUTH")) return BTN_A; if(!strcmp(s,"BTN_B")||!strcmp(s,"BTN_EAST")) return BTN_B; if(!strcmp(s,"BTN_X")||!strcmp(s,"BTN_NORTH")) return BTN_X; if(!strcmp(s,"BTN_Y")||!strcmp(s,"BTN_WEST")) return BTN_Y; if(!strcmp(s,"BTN_TL")) return BTN_TL; if(!strcmp(s,"BTN_TR")) return BTN_TR; if(!strcmp(s,"BTN_TL2")) return BTN_TL2; if(!strcmp(s,"BTN_TR2")) return BTN_TR2; if(!strcmp(s,"BTN_THUMBL")) return BTN_THUMBL; if(!strcmp(s,"BTN_THUMBR")) return BTN_THUMBR; if(!strcmp(s,"BTN_SELECT")) return BTN_SELECT; if(!strcmp(s,"BTN_START")) return BTN_START; if(!strcmp(s,"BTN_MODE")) return BTN_MODE; return -1; }
+static int abs_code(const char *s) { int a=parse_prefixed_code(s,"ABS_"); if(a>=0) return a; int n=parse_code_number(s); if(n>=0) return n; if(!strcmp(s,"ABS_X")) return ABS_X; if(!strcmp(s,"ABS_Y")) return ABS_Y; if(!strcmp(s,"ABS_Z")) return ABS_Z; if(!strcmp(s,"ABS_RX")) return ABS_RX; if(!strcmp(s,"ABS_RY")) return ABS_RY; if(!strcmp(s,"ABS_RZ")) return ABS_RZ; if(!strcmp(s,"ABS_HAT0X")) return ABS_HAT0X; if(!strcmp(s,"ABS_HAT0Y")) return ABS_HAT0Y; return -1; }
+static int src_key_code(const char *s) { int b=parse_prefixed_code(s,"BTN_"); if(b>=0) return b; int k=key_code(s); if(k>=0) return k; if(!strcmp(s,"BTN_A")||!strcmp(s,"BTN_SOUTH")) return BTN_A; if(!strcmp(s,"BTN_B")||!strcmp(s,"BTN_EAST")) return BTN_B; if(!strcmp(s,"BTN_X")||!strcmp(s,"BTN_NORTH")) return BTN_X; if(!strcmp(s,"BTN_Y")||!strcmp(s,"BTN_WEST")) return BTN_Y; if(!strcmp(s,"BTN_TL")) return BTN_TL; if(!strcmp(s,"BTN_TR")) return BTN_TR; if(!strcmp(s,"BTN_TL2")) return BTN_TL2; if(!strcmp(s,"BTN_TR2")) return BTN_TR2; if(!strcmp(s,"BTN_THUMBL")) return BTN_THUMBL; if(!strcmp(s,"BTN_THUMBR")) return BTN_THUMBR; if(!strcmp(s,"BTN_SELECT")) return BTN_SELECT; if(!strcmp(s,"BTN_START")) return BTN_START; if(!strcmp(s,"BTN_MODE")) return BTN_MODE; return -1; }
 
 static void cfg_defaults(Config *c) { memset(c,0,sizeof(*c)); strcpy(c->event_name,"Xbox Wireless Controller"); strcpy(c->output_name,"Handheld Remapper Keyboard"); strcpy(c->output_mouse_name,"Handheld Remapper Mouse"); strcpy(c->mouse_axis_x,"ABS_Z"); strcpy(c->mouse_axis_y,"ABS_RZ"); c->mouse_center_x=0; c->mouse_center_y=0; c->mouse_min_x=-32768; c->mouse_max_x=32767; c->mouse_min_y=-32768; c->mouse_max_y=32767; c->mouse_deadzone=50; c->mouse_speed=8; c->mouse_interval_ms=1; c->block_original_input=1; }
 static void parse_map(Config *c, const char *value) {
@@ -139,16 +155,16 @@ static int load_config(const char *path, Config *c) {
     return 0;
 }
 
-static FILE *start_hid(const Config *c) { FILE *h=popen("/system/bin/hid -","w"); if(!h) return NULL; fprintf(h,"{\"id\":1,\"command\":\"register\",\"name\":\"%s\",\"vid\":0x5247,\"pid\":0x0505,\"bus\":\"usb\",\"descriptor\":[0x05,0x01,0x09,0x06,0xa1,0x01,0x05,0x07,0x19,0xe0,0x29,0xe7,0x15,0x00,0x25,0x01,0x75,0x01,0x95,0x08,0x81,0x02,0x95,0x01,0x75,0x08,0x81,0x01,0x95,0x06,0x75,0x08,0x15,0x00,0x25,0x65,0x05,0x07,0x19,0x00,0x29,0x65,0x81,0x00,0xc0]}\n", c->output_name); fprintf(h,"{\"id\":2,\"command\":\"register\",\"name\":\"%s\",\"vid\":0x5247,\"pid\":0x0506,\"bus\":\"usb\",\"descriptor\":[0x05,0x01,0x09,0x02,0xa1,0x01,0x09,0x01,0xa1,0x00,0x05,0x09,0x19,0x01,0x29,0x03,0x15,0x00,0x25,0x01,0x95,0x03,0x75,0x01,0x81,0x02,0x95,0x01,0x75,0x05,0x81,0x01,0x05,0x01,0x09,0x30,0x09,0x31,0x09,0x38,0x15,0x81,0x25,0x7f,0x75,0x08,0x95,0x03,0x81,0x06,0xc0,0xc0]}\n", c->output_mouse_name); fprintf(h,"{\"id\":1,\"command\":\"delay\",\"duration\":750}\n{\"id\":1,\"command\":\"report\",\"report\":[0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00]}\n{\"id\":2,\"command\":\"report\",\"report\":[0x00,0x00,0x00,0x00]}\n"); fflush(h); return h; }
+static FILE *start_hid(const Config *c) { FILE *h=popen("/system/bin/hid -","w"); if(!h) return NULL; fprintf(h,"{\"id\":1,\"command\":\"register\",\"name\":\"%s\",\"vid\":0x5247,\"pid\":0x0505,\"bus\":\"usb\",\"descriptor\":[0x05,0x01,0x09,0x06,0xa1,0x01,0x05,0x07,0x19,0xe0,0x29,0xe7,0x15,0x00,0x25,0x01,0x75,0x01,0x95,0x08,0x81,0x02,0x95,0x01,0x75,0x08,0x81,0x01,0x95,0x06,0x75,0x08,0x15,0x00,0x25,0x65,0x05,0x07,0x19,0x00,0x29,0x65,0x81,0x00,0xc0]}\n", c->output_name); fprintf(h,"{\"id\":2,\"command\":\"register\",\"name\":\"%s\",\"vid\":0x5247,\"pid\":0x0506,\"bus\":\"usb\",\"descriptor\":[0x05,0x01,0x09,0x02,0xa1,0x01,0x09,0x01,0xa1,0x00,0x05,0x09,0x19,0x01,0x29,0x08,0x15,0x00,0x25,0x01,0x95,0x08,0x75,0x01,0x81,0x02,0x05,0x01,0x09,0x30,0x09,0x31,0x09,0x38,0x15,0x81,0x25,0x7f,0x75,0x08,0x95,0x03,0x81,0x06,0xc0,0xc0]}\n", c->output_mouse_name); fprintf(h,"{\"id\":1,\"command\":\"delay\",\"duration\":750}\n{\"id\":1,\"command\":\"report\",\"report\":[0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00]}\n{\"id\":2,\"command\":\"report\",\"report\":[0x00,0x00,0x00,0x00]}\n"); fflush(h); return h; }
 static int find_event_by_name(const char *name, char *out, size_t outsz) { FILE *p=popen("getevent -lp","r"); if(!p) return -1; char line[512], dev[128]="", nm[256]=""; int found=0; while(fgets(line,sizeof(line),p)) { if(!strncmp(line,"add device",10)) { if(dev[0]&&strstr(nm,name)){found=1;break;} char *slash=strstr(line,"/dev/input/event"); if(slash){sscanf(slash,"%127s",dev); nm[0]=0;} } else if(strstr(line,"name:")) { char *q=strchr(line,'"'); if(q){ char *r=strrchr(q+1,'"'); if(r){*r=0; strncpy(nm,q+1,sizeof(nm)-1);} } } } if(!found && dev[0]&&strstr(nm,name)) found=1; pclose(p); if(found){strncpy(out,dev,outsz-1); return 0;} return -1; }
 static int wait_event(const char *name, char *out, size_t outsz) { for(int i=0;i<100;i++){ if(find_event_by_name(name,out,outsz)==0) return 0; usleep(100000); } return -1; }
 static int send_ev(int fd, uint16_t type, uint16_t code, int32_t value) { struct input_event ev; memset(&ev,0,sizeof(ev)); gettimeofday(&ev.time,NULL); ev.type=type; ev.code=code; ev.value=value; return write(fd,&ev,sizeof(ev))==(ssize_t)sizeof(ev)?0:-1; }
 static void sync_ev(int fd){ send_ev(fd,EV_SYN,SYN_REPORT,0); }
 static int clamp_hid_rel(int v) { if(v>127)return 127; if(v<-127)return -127; return v; }
 static int hid_byte(int v) { return clamp_hid_rel(v)&0xff; }
-static int mouse_button_bit(int code) { if(code==BTN_LEFT)return 1; if(code==BTN_RIGHT)return 2; if(code==BTN_MIDDLE)return 4; return 0; }
+static int mouse_button_bit(int code) { if(code==BTN_LEFT)return 1; if(code==BTN_RIGHT)return 2; if(code==BTN_MIDDLE)return 4; if(code==BTN_SIDE)return 8; if(code==BTN_EXTRA)return 16; if(code==BTN_FORWARD)return 32; if(code==BTN_BACK)return 64; if(code==BTN_TASK)return 128; if(code>=BTN_MOUSE&&code<BTN_MOUSE+8)return 1<<(code-BTN_MOUSE); return 0; }
 static void send_hid_mouse(FILE *hid, int buttons, int dx, int dy, int wheel) {
-    fprintf(hid,"{\"id\":2,\"command\":\"report\",\"report\":[0x%02x,0x%02x,0x%02x,0x%02x]}\n", buttons&7, hid_byte(dx), hid_byte(dy), hid_byte(wheel));
+    fprintf(hid,"{\"id\":2,\"command\":\"report\",\"report\":[0x%02x,0x%02x,0x%02x,0x%02x]}\n", buttons&0xff, hid_byte(dx), hid_byte(dy), hid_byte(wheel));
     fflush(hid);
 }
 static void send_evdev_wheel(int mousefd, int delta) {

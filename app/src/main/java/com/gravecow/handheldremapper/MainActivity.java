@@ -701,7 +701,7 @@ public class MainActivity extends Activity {
     private DetectedInput captureDetectedInput(DeviceInfo device, int timeoutSeconds) {
         Process p = null;
         try {
-            p = new ProcessBuilder("su", "-c", "getevent -l " + device.path).redirectErrorStream(true).start();
+            p = new ProcessBuilder("su", "-c", "getevent " + device.path).redirectErrorStream(true).start();
             destroyAfterTimeout(p, timeoutSeconds);
             BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
             String line;
@@ -850,7 +850,24 @@ public class MainActivity extends Activity {
                 return new EventLine(parts[i], parts[i + 1], parseEventValue(parts[i + 2]));
             }
         }
+        for (int i = 0; i < parts.length - 2; i++) {
+            Integer type = parseHexCode(parts[i]);
+            Integer code = parseHexCode(parts[i + 1]);
+            if (type == null || code == null) continue;
+            if (type == 1 || type == 3) return new EventLine(type == 1 ? "EV_KEY" : "EV_ABS", String.valueOf(code), parseEventValue(parts[i + 2]));
+        }
         return null;
+    }
+
+    private Integer parseHexCode(String s) {
+        try {
+            if (s == null) return null;
+            s = s.trim().replace(":", "");
+            if (!s.matches("[0-9a-fA-F]{4}")) return null;
+            return Integer.parseInt(s, 16);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private int parseEventValue(String s) {

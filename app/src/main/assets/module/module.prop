@@ -1,6 +1,6 @@
 id=rg505_dpad_wasd
 name=RG505 Input Mapper
-version=2.0-native
-versionCode=20
+version=3.0-presets
+versionCode=30
 author=ChatGPT
-description=Native daemon backend for RG505/GammaOS controller to keyboard/mouse mapping.
+description=Native daemon backend with versioned preset UI support.

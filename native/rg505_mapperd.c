@@ -113,7 +113,7 @@ static int mouse_delta(int raw, int center, int min, int max, int dz, int speed)
     int usable=extent-dz;
     int active=ad-dz;
     if(active<0) active=0;
-    int d=active*8*speed/usable;
+    int d=active*2*speed/usable;
     if(d==0)d=1;
     if(diff<0)d=-d;
     if(d>127)d=127;

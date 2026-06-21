@@ -278,7 +278,7 @@ public class MainActivity extends Activity {
             presets.add(editing);
             editingIsNew = false;
         }
-        savePresets();
+        savePresetsSync();
         updateSaveButton(false);
         setStatus("Saved " + editing.name);
     }
@@ -295,13 +295,15 @@ public class MainActivity extends Activity {
             editing.version++;
             editing.lastAppliedHash = h;
         }
-        savePresets();
+        savePresetsSync();
+        final String appliedName = editing.name;
+        final int appliedVersion = editing.version;
         String config = editing.toConfig();
         String cmd = "cat > " + MODDIR + "/config <<'CFG'\n" + config + "CFG\nsh " + MODDIR + "/mapctl restart";
         runAndShowAsync(cmd, () -> {
-            prefs.edit().putString(APPLIED_NAME, editing.name).putInt(APPLIED_VERSION, editing.version).apply();
+            prefs.edit().putString(APPLIED_NAME, appliedName).putInt(APPLIED_VERSION, appliedVersion).commit();
             showPreset(editing, false);
-            setStatus("Applied " + editing.name + " v" + editing.version);
+            setStatus("Applied " + appliedName + " v" + appliedVersion);
         });
     }
 
@@ -348,7 +350,17 @@ public class MainActivity extends Activity {
         if (saveButton == null) return;
         saveButton.setText(dirty ? "Save" : "Saved");
         saveButton.setClickable(dirty);
-        saveButton.setEnabled(dirty);
+        saveButton.setEnabled(true);
+        if (dirty) {
+            saveButton.setBackgroundTintList(android.content.res.ColorStateList.valueOf(PRIMARY));
+            saveButton.setTextColor(Color.WHITE);
+            saveButton.setStrokeWidth(0);
+        } else {
+            saveButton.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.rgb(236, 239, 244)));
+            saveButton.setTextColor(MUTED);
+            saveButton.setStrokeColor(android.content.res.ColorStateList.valueOf(LINE));
+            saveButton.setStrokeWidth(dp(1));
+        }
     }
 
     private void addMappingRow(String input, String target) {
@@ -890,6 +902,15 @@ public class MainActivity extends Activity {
             JSONArray arr = new JSONArray();
             for (Preset p : presets) arr.put(p.toJson());
             prefs.edit().putString(PRESETS_JSON, arr.toString()).apply();
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void savePresetsSync() {
+        try {
+            JSONArray arr = new JSONArray();
+            for (Preset p : presets) arr.put(p.toJson());
+            prefs.edit().putString(PRESETS_JSON, arr.toString()).commit();
         } catch (Exception ignored) {
         }
     }

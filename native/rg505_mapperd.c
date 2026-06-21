@@ -18,6 +18,8 @@
 
 #define MAX_MAPS 64
 #define STR 128
+#define MOUSE_FP 256
+#define MOUSE_BASE_FP 24
 
 static volatile sig_atomic_t g_stop = 0;
 static const char *PIDFILE = "/data/local/tmp/rg505_mapperd.pid";
@@ -103,24 +105,31 @@ static int find_event_by_name(const char *name, char *out, size_t outsz) { FILE 
 static int wait_event(const char *name, char *out, size_t outsz) { for(int i=0;i<100;i++){ if(find_event_by_name(name,out,outsz)==0) return 0; usleep(100000); } return -1; }
 static int send_ev(int fd, uint16_t type, uint16_t code, int32_t value) { struct input_event ev; memset(&ev,0,sizeof(ev)); gettimeofday(&ev.time,NULL); ev.type=type; ev.code=code; ev.value=value; return write(fd,&ev,sizeof(ev))==(ssize_t)sizeof(ev)?0:-1; }
 static void sync_ev(int fd){ send_ev(fd,EV_SYN,SYN_REPORT,0); }
-static int mouse_delta(int raw, int center, int min, int max, int dz, int speed){
+static int mouse_delta_fp(int raw, int center, int min, int max, int dz, int speed){
     int diff=raw-center;
     int ad=diff<0?-diff:diff;
     if(ad<=dz)return 0;
+    if(speed<1) speed=1;
     int extent=diff>0 ? max-center : center-min;
     if(extent<=dz) extent=max-min;
     if(extent<=dz) extent=800;
     int usable=extent-dz;
     int active=ad-dz;
     if(active<0) active=0;
-    int d=active*2*speed/usable;
+    int d=active*MOUSE_BASE_FP*speed/usable;
     if(d==0)d=1;
     if(diff<0)d=-d;
+    return d;
+}
+static int consume_mouse_delta(int *accum, int delta_fp) {
+    *accum += delta_fp;
+    int d=*accum/MOUSE_FP;
     if(d>127)d=127;
     if(d<-127)d=-127;
+    *accum -= d*MOUSE_FP;
     return d;
 }
 static void set_target(const Mapping *m, int keyfd, int mousefd, int down) { int fd = m->target_type==TARGET_KEY ? keyfd : mousefd; send_ev(fd, EV_KEY, m->target_code, down); sync_ev(fd); }
 
-int main(int argc, char **argv) { const char *cfgpath=argc>1?argv[1]:"/data/adb/modules/rg505_dpad_wasd/config"; Config cfg; load_config(cfgpath,&cfg); FILE *pf=fopen(PIDFILE,"w"); if(pf){fprintf(pf,"%d\n",getpid()); fclose(pf);} signal(SIGTERM,on_signal); signal(SIGINT,on_signal); logf2("rg505_mapperd starting native backend"); logf2("source name=%s mouse axes=%s/%s center=%d,%d range x=%d..%d y=%d..%d dz=%d speed=%d interval=%d",cfg.event_name,cfg.mouse_axis_x,cfg.mouse_axis_y,cfg.mouse_center_x,cfg.mouse_center_y,cfg.mouse_min_x,cfg.mouse_max_x,cfg.mouse_min_y,cfg.mouse_max_y,cfg.mouse_deadzone,cfg.mouse_speed,cfg.mouse_interval_ms); FILE *hid=start_hid(&cfg); if(!hid){logf2("ERROR starting hid"); return 1;} char srcpath[128], keypath[128], mousepath[128]; if(wait_event(cfg.event_name,srcpath,sizeof(srcpath))||wait_event(cfg.output_name,keypath,sizeof(keypath))||wait_event(cfg.output_mouse_name,mousepath,sizeof(mousepath))){logf2("ERROR finding event nodes");return 2;} logf2("events source=%s keyboard=%s mouse=%s",srcpath,keypath,mousepath); int src=open(srcpath,O_RDONLY|O_CLOEXEC); int keyfd=open(keypath,O_WRONLY|O_CLOEXEC); int mousefd=open(mousepath,O_WRONLY|O_CLOEXEC); if(src<0||keyfd<0||mousefd<0){logf2("ERROR open fds: %s",strerror(errno));return 3;} int mx_code=abs_code(cfg.mouse_axis_x), my_code=abs_code(cfg.mouse_axis_y); int mdx=0, mdy=0; struct pollfd pfd={.fd=src,.events=POLLIN}; while(!g_stop && access(STOPFILE,F_OK)!=0){ int pr=poll(&pfd,1,cfg.mouse_interval_ms); if(pr>0 && (pfd.revents&POLLIN)){ struct input_event ev; while(read(src,&ev,sizeof(ev))==(ssize_t)sizeof(ev)){ if(ev.type==EV_ABS){ for(int i=0;i<cfg.map_count;i++){ Mapping *m=&cfg.maps[i]; if(m->type==MAP_AXIS && m->src_code==ev.code){ int dir=0; if(ev.code==ABS_HAT0X||ev.code==ABS_HAT0Y) dir=ev.value; else { int center = ev.code==mx_code?cfg.mouse_center_x:(ev.code==my_code?cfg.mouse_center_y:0); int diff=ev.value-center; if(diff>cfg.mouse_deadzone)dir=1; else if(diff<-cfg.mouse_deadzone)dir=-1; } int active=(dir==m->dir); if(active!=m->active){ set_target(m,keyfd,mousefd,active); m->active=active; } } } if(ev.code==mx_code) mdx=mouse_delta(ev.value,cfg.mouse_center_x,cfg.mouse_min_x,cfg.mouse_max_x,cfg.mouse_deadzone,cfg.mouse_speed); if(ev.code==my_code) mdy=mouse_delta(ev.value,cfg.mouse_center_y,cfg.mouse_min_y,cfg.mouse_max_y,cfg.mouse_deadzone,cfg.mouse_speed); } else if(ev.type==EV_KEY){ for(int i=0;i<cfg.map_count;i++){ Mapping *m=&cfg.maps[i]; if(m->type==MAP_BUTTON && m->src_code==ev.code){ int active=ev.value!=0; if(active!=m->active){ set_target(m,keyfd,mousefd,active); m->active=active; } } } } if(ev.type==EV_SYN) break; } } if(mdx||mdy){ if(mdx) send_ev(mousefd,EV_REL,REL_X,mdx); if(mdy) send_ev(mousefd,EV_REL,REL_Y,mdy); sync_ev(mousefd); } }
+int main(int argc, char **argv) { const char *cfgpath=argc>1?argv[1]:"/data/adb/modules/rg505_dpad_wasd/config"; Config cfg; load_config(cfgpath,&cfg); FILE *pf=fopen(PIDFILE,"w"); if(pf){fprintf(pf,"%d\n",getpid()); fclose(pf);} signal(SIGTERM,on_signal); signal(SIGINT,on_signal); logf2("rg505_mapperd starting native backend"); logf2("source name=%s mouse axes=%s/%s center=%d,%d range x=%d..%d y=%d..%d dz=%d speed=%d interval=%d",cfg.event_name,cfg.mouse_axis_x,cfg.mouse_axis_y,cfg.mouse_center_x,cfg.mouse_center_y,cfg.mouse_min_x,cfg.mouse_max_x,cfg.mouse_min_y,cfg.mouse_max_y,cfg.mouse_deadzone,cfg.mouse_speed,cfg.mouse_interval_ms); FILE *hid=start_hid(&cfg); if(!hid){logf2("ERROR starting hid"); return 1;} char srcpath[128], keypath[128], mousepath[128]; if(wait_event(cfg.event_name,srcpath,sizeof(srcpath))||wait_event(cfg.output_name,keypath,sizeof(keypath))||wait_event(cfg.output_mouse_name,mousepath,sizeof(mousepath))){logf2("ERROR finding event nodes");return 2;} logf2("events source=%s keyboard=%s mouse=%s",srcpath,keypath,mousepath); int src=open(srcpath,O_RDONLY|O_CLOEXEC); int keyfd=open(keypath,O_WRONLY|O_CLOEXEC); int mousefd=open(mousepath,O_WRONLY|O_CLOEXEC); if(src<0||keyfd<0||mousefd<0){logf2("ERROR open fds: %s",strerror(errno));return 3;} int mx_code=abs_code(cfg.mouse_axis_x), my_code=abs_code(cfg.mouse_axis_y); int mdx_fp=0, mdy_fp=0, accx=0, accy=0; struct pollfd pfd={.fd=src,.events=POLLIN}; while(!g_stop && access(STOPFILE,F_OK)!=0){ int pr=poll(&pfd,1,cfg.mouse_interval_ms); if(pr>0 && (pfd.revents&POLLIN)){ struct input_event ev; while(read(src,&ev,sizeof(ev))==(ssize_t)sizeof(ev)){ if(ev.type==EV_ABS){ for(int i=0;i<cfg.map_count;i++){ Mapping *m=&cfg.maps[i]; if(m->type==MAP_AXIS && m->src_code==ev.code){ int dir=0; if(ev.code==ABS_HAT0X||ev.code==ABS_HAT0Y) dir=ev.value; else { int center = ev.code==mx_code?cfg.mouse_center_x:(ev.code==my_code?cfg.mouse_center_y:0); int diff=ev.value-center; if(diff>cfg.mouse_deadzone)dir=1; else if(diff<-cfg.mouse_deadzone)dir=-1; } int active=(dir==m->dir); if(active!=m->active){ set_target(m,keyfd,mousefd,active); m->active=active; } } } if(ev.code==mx_code){ mdx_fp=mouse_delta_fp(ev.value,cfg.mouse_center_x,cfg.mouse_min_x,cfg.mouse_max_x,cfg.mouse_deadzone,cfg.mouse_speed); if(!mdx_fp) accx=0; } if(ev.code==my_code){ mdy_fp=mouse_delta_fp(ev.value,cfg.mouse_center_y,cfg.mouse_min_y,cfg.mouse_max_y,cfg.mouse_deadzone,cfg.mouse_speed); if(!mdy_fp) accy=0; } } else if(ev.type==EV_KEY){ for(int i=0;i<cfg.map_count;i++){ Mapping *m=&cfg.maps[i]; if(m->type==MAP_BUTTON && m->src_code==ev.code){ int active=ev.value!=0; if(active!=m->active){ set_target(m,keyfd,mousefd,active); m->active=active; } } } } if(ev.type==EV_SYN) break; } } int mdx=mdx_fp?consume_mouse_delta(&accx,mdx_fp):0; int mdy=mdy_fp?consume_mouse_delta(&accy,mdy_fp):0; if(mdx||mdy){ if(mdx) send_ev(mousefd,EV_REL,REL_X,mdx); if(mdy) send_ev(mousefd,EV_REL,REL_Y,mdy); sync_ev(mousefd); } }
  for(int i=0;i<cfg.map_count;i++) if(cfg.maps[i].active) set_target(&cfg.maps[i],keyfd,mousefd,0); logf2("rg505_mapperd stopping"); close(src); close(keyfd); close(mousefd); if(hid) pclose(hid); unlink(PIDFILE); return 0; }

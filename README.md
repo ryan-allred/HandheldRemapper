@@ -1,79 +1,66 @@
 # Handheld Remapper
 
-Handheld Remapper is an Android app and Magisk-backed native daemon for remapping controller input on Android gaming handhelds.
+Handheld Remapper is an Android app for remapping controller input on rooted Android gaming handhelds. It installs a small Magisk-backed native daemon that reads controller events and emits virtual keyboard and mouse input.
 
-It provides a preset editor for mapping controller buttons and axes to keyboard keys, mouse buttons, mouse movement, and mouse wheel ticks. It was developed and tested on the Anbernic RG505 running GammaOS.
+The app was developed and tested on the Anbernic RG505 running GammaOS. Other rooted Android handhelds may work if their controls are exposed through Android input events.
 
 ## Screenshots
 
-TODO: Add a screenshot of the main preset list showing the applied preset and backend status.
+TODO: Add a screenshot of the main preset list with backend status and the currently applied preset.
 
-TODO: Add a screenshot of the preset editor showing input mappings, the block-original-input toggle, and mouse-stick configuration.
+TODO: Add a screenshot of the preset editor with mappings, preset behavior, and mouse-stick settings.
 
 ## Features
 
-- Create, edit, save, delete, and apply multiple input presets.
-- Export and import the full preset list as a JSON backup.
-- Apply presets without creating a new preset until the preset is explicitly saved.
-- Map buttons or axis directions to keyboard keys, mouse buttons, and mouse wheel up/down.
-- Learn the mouse-look stick axes and range from live controller input.
-- Normalize stick movement across different hardware axis ranges.
-- Optionally block the original controller input so only remapped keyboard/mouse output reaches the game.
-- Install or update the bundled Magisk backend from inside the app.
-- Show the currently applied preset and version.
-
-## How It Works
-
-The Android app manages presets and writes the active preset into the Magisk module config. The native backend reads the source controller event device, optionally grabs it with `EVIOCGRAB`, and emits virtual keyboard and mouse HID reports.
-
-The backend module is bundled in the APK under `app/src/main/assets/module`.
+- Create and apply multiple remapping presets.
+- Map buttons or axis directions to keyboard keys, mouse buttons, mouse movement, and mouse wheel up/down.
+- Listen for controller input when creating mappings.
+- Learn analog stick axes and range for mouse movement.
+- Optionally block the original controller input so games only receive the remapped output.
+- Export and import presets as JSON backups.
+- Install and update the bundled backend from inside the app.
 
 ## Requirements
 
 - Rooted Android handheld.
 - Magisk.
 - Android 8.0 or newer.
-- A controller input device exposed through Android input events.
+- Controller input exposed through Android input events.
 
-The project has been tested on the Anbernic RG505 with GammaOS. Other rooted Android handhelds may work, but may need different source device names or axis selections.
+## Downloading An APK
 
-## Building
+Open the latest successful GitHub Actions run for the `Build APK` workflow and download the APK artifact. Install that APK on the handheld, then open Handheld Remapper and grant root when prompted.
 
-The easiest way to build a full APK is the GitHub Actions workflow:
+## Building From Source
 
-1. Push the repo to GitHub.
-2. Open the Actions tab.
-3. Run the `Build APK` workflow.
-4. Download `app-debug.apk` from the workflow artifacts.
+The GitHub Actions workflow is the recommended build path because it compiles the native ARM64 backend and packages it into the APK.
 
-The workflow builds the native ARM64 daemon and packages it into the APK.
+1. Fork or clone this repository.
+2. Push it to GitHub.
+3. Open the Actions tab.
+4. Run the `Build APK` workflow.
+5. Download the generated APK artifact.
 
-Local Android builds are also supported:
+For local Android-only builds:
 
 ```sh
 ./gradlew :app:assembleDebug
 ```
 
-Local builds require an installed Android SDK. Native daemon compilation is handled by the GitHub workflow.
-
-## Updating Installed Builds
-
-Debug APKs are signed with the checked-in development update key at `app/signing/androidremapper-dev.jks`. This lets new debug builds install over previous debug builds from this repo.
-
-If an older APK was installed with a different debug key, Android may require one uninstall before the first APK signed with this repo key can be installed. After that, updates should install in place.
-
-Version 5 renamed the Android package and Magisk module id from the original device-specific names. Uninstall older builds and remove the old backend module before installing version 5 or newer.
-
-Do not commit `local.properties`; it is machine-specific SDK configuration.
+Local builds require an installed Android SDK. The native backend is built by the GitHub workflow.
 
 ## Using The App
 
 1. Install the APK on the handheld.
-2. Open Handheld Remapper and grant root when prompted.
-3. Install or update the backend if requested.
+2. Open Handheld Remapper and grant root.
+3. Install the backend when prompted.
 4. Create or edit a preset.
-5. Use the mapping listener to bind source inputs to target keys or mouse actions.
+5. Use the mapping listener to bind controller inputs to keyboard or mouse targets.
 6. Use Learn stick if you want analog stick mouse movement.
-7. Apply the preset.
+7. Tap Apply to write the preset and restart the backend.
 
-If the backend is updated, apply the preset again so the daemon restarts with the latest config.
+If you update the backend later, the app will reapply the current preset when possible.
+
+## Notes
+
+This project is still early and currently tested on one device. If a mapping does not behave as expected, use the Debug screen in the app to collect backend status, logs, input devices, and direct wheel-test output.

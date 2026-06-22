@@ -74,7 +74,11 @@ static int key_code(const char *s) {
         {"KEY_Q",16},{"Q",16},{"KEY_W",17},{"W",17},{"KEY_E",18},{"E",18},{"KEY_R",19},{"R",19},{"KEY_T",20},{"T",20},{"KEY_Y",21},{"Y",21},{"KEY_U",22},{"U",22},{"KEY_I",23},{"I",23},{"KEY_O",24},{"O",24},{"KEY_P",25},{"P",25},
         {"KEY_A",30},{"A",30},{"KEY_S",31},{"S",31},{"KEY_D",32},{"D",32},{"KEY_F",33},{"F",33},{"KEY_G",34},{"G",34},{"KEY_H",35},{"H",35},{"KEY_J",36},{"J",36},{"KEY_K",37},{"K",37},{"KEY_L",38},{"L",38},
         {"KEY_Z",44},{"Z",44},{"KEY_X",45},{"X",45},{"KEY_C",46},{"C",46},{"KEY_V",47},{"V",47},{"KEY_B",48},{"B",48},{"KEY_N",49},{"N",49},{"KEY_M",50},{"M",50},
-        {"KEY_SPACE",57},{"SPACE",57},{"KEY_ENTER",28},{"ENTER",28},{"KEY_TAB",15},{"TAB",15},{"KEY_LEFTCTRL",29},{"CTRL",29},{"KEY_LEFTSHIFT",42},{"SHIFT",42},{"KEY_LEFTALT",56},{"ALT",56},{"KEY_BACKSPACE",14},{"BACKSPACE",14}
+        {"KEY_SPACE",57},{"SPACE",57},{"KEY_ENTER",28},{"ENTER",28},{"KEY_TAB",15},{"TAB",15},
+        {"KEY_LEFTCTRL",29},{"KEY_CTRL",29},{"CTRL",29},{"KEY_RIGHTCTRL",97},{"RIGHTCTRL",97},
+        {"KEY_LEFTSHIFT",42},{"KEY_SHIFT",42},{"SHIFT",42},{"KEY_RIGHTSHIFT",54},{"RIGHTSHIFT",54},
+        {"KEY_LEFTALT",56},{"KEY_ALT",56},{"ALT",56},{"KEY_RIGHTALT",100},{"RIGHTALT",100},
+        {"KEY_BACKSPACE",14},{"BACKSPACE",14}
     };
     for(size_t i=0;i<sizeof(t)/sizeof(t[0]);i++) if(!strcmp(s,t[i].n)) return t[i].c;
     int n=parse_code_number(s);
